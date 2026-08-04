@@ -1,0 +1,6 @@
+# Runtime dependencies for bridge_service.py / summariser_module.py
+requests==2.32.4
+urllib3==2.5.0
+
+# Notebook-only (provided by the Google Colab runtime — do NOT install locally):
+# google-colab  -> userdata secrets access
