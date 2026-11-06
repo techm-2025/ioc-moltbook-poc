@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -16,6 +17,12 @@ from http import HTTPStatus
 
 from summariser_module import summarize_for_moltbook
 
+try:
+    # from solver import calculate_answer as _ext_calculate_answer
+    _ext_calculate_answer = None
+except Exception:
+    _ext_calculate_answer = None
+
 RETRYABLE_STATUS_CODES = {
 HTTPStatus.TOO_MANY_REQUESTS,      # 429
 HTTPStatus.REQUEST_TIMEOUT,        # 408
@@ -25,11 +32,28 @@ HTTPStatus.SERVICE_UNAVAILABLE,    # 503
 HTTPStatus.GATEWAY_TIMEOUT         # 504
 }
 
+# Blended Rates (85% Input / 15% Output ratio) based on official model pricing per token:
+# - Gemini 2.5 Flash : ($0.10 * 0.85 + $0.40 * 0.15) / 1,000,000 = $0.000000145 per token
+# - GPT-4o-mini      : ($0.15 * 0.85 + $0.60 * 0.15) / 1,000,000 = $0.0000002175 per token
+# - Claude 3.5 Sonnet: ($3.00 * 0.85 + $15.00 * 0.15) / 1,000,000 = $0.0000048 per token
+MODEL_BLENDED_RATES = {
+    "gemini": Decimal("0.000000145"),
+    "gpt-4o-mini": Decimal("0.0000002175"),
+    "sonnet": Decimal("0.0000048")
+}
+
 urllib3.disable_warnings()
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+
+def estimate_tokens_from_spend(spend_usd: Decimal, model_family: str = "gemini") -> int:
+    """Reverse-engineers estimated token consumption from a Decimal USD spend delta."""
+    if spend_usd <= Decimal("0"):
+        return 0
+    rate = MODEL_BLENDED_RATES.get(model_family, MODEL_BLENDED_RATES["gemini"])
+    return int(spend_usd / rate)
 
 @dataclass
 class BridgeConfig:
@@ -49,6 +73,10 @@ class BridgeConfig:
     midpoint_after_seconds: int = 9999
 
     litellm_api_key: str = ""
+    litellm_user_id1: str = ""
+    litellm_api_key2: str = ""
+    litellm_user_id2: str = ""
+
     litellm_model: str = "azure/gpt-4o-mini"
 
     agent_handles: Tuple[str, ...] = (
@@ -59,11 +87,33 @@ class BridgeConfig:
     )
 
     scenario_facts: str = ""
+    # agent_lens_templates: Dict[str, str] = field(default_factory=lambda: {
+    #     "financeguard": "FinanceGuard lens: affordability, debt, scholarship value, ROI, and financial flexibility.",
+    #     "careermax":    "CareerMax lens: career outcomes, internships, alumni access, major fit, and long-term optionality.",
+    #     "studentlife":  "StudentLife lens: campus fit, city experience, personal growth, and quality of life.",
+    #     "riskanalyst":  "RiskAnalyst lens: downside risk, fallback plans, scholarship renewal, and financial resilience.",
+    # })
+
     agent_lens_templates: Dict[str, str] = field(default_factory=lambda: {
-        "financeguard": "FinanceGuard lens: affordability, debt, scholarship value, ROI, and financial flexibility.",
-        "careermax":    "CareerMax lens: career outcomes, internships, alumni access, major fit, and long-term optionality.",
-        "studentlife":  "StudentLife lens: campus fit, city experience, personal growth, and quality of life.",
-        "riskanalyst":  "RiskAnalyst lens: downside risk, fallback plans, scholarship renewal, and financial resilience.",
+        "financeguard": (
+            "FinanceGuard lens: Focus EXCLUSIVELY on zero-debt and out-of-pocket costs under $20k/yr. "
+            "Accept offers that meet zero debt. Do NOT evaluate career, salary, or campus culture terms."
+        ),
+        "careermax": (
+            "CareerMax lens: Focus EXCLUSIVELY on employment outcomes and internship programs. "
+            "Accept offers with 90%+ placement or guaranteed internships. "
+            "Do NOT reject based on salary documentation or emergency fund amounts."
+        ),
+        "studentlife": (
+            "StudentLife lens: Focus EXCLUSIVELY on campus community, student wellness, and lifestyle. "
+            "Accept offers providing a positive campus experience. "
+            "STRICT RULE: Do NOT evaluate or reject based on emergency funds, salaries, or debt. Leave those entirely to the other agents."
+        ),
+        "riskanalyst": (
+            "RiskAnalyst lens: Focus EXCLUSIVELY on downside mitigation and scholarship renewal terms. "
+            "Accept any available emergency fund option ($5,000+) as adequate risk mitigation. "
+            "Support agreement once GPA terms (3.0) and debt-free status are present."
+        ),
     })
     
 
@@ -102,7 +152,7 @@ class MoltbookClient:
     MAX_RETRIES = 5
     BASE_DELAY = 1
     MAX_DELAY = 60
-
+    RETRYABLE_STATUS_CODES = RETRYABLE_STATUS_CODES
     def __init__(self, api_key: str, base_url: str = "https://www.moltbook.com/api/v1", verify_ssl: bool = False):
         self.base_url = base_url.rstrip("/")
         self.verify_ssl = verify_ssl
@@ -110,6 +160,7 @@ class MoltbookClient:
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
+        self.consecutive_verify_failures = 0
 
     def _request(self, method: str, path: str, *, params: Optional[Dict[str, Any]] = None, json_body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         url = f"{self.base_url}{path}"
@@ -176,10 +227,13 @@ class MoltbookClient:
                 print(f"SubMolt create failed, retrying get: {create_exc}")
                 return self.get_submolt(name)
 
-    def solve_challenge(self, text: str) -> float:
+    def solve_challenge_legacy(self, text: str) -> float:
         import re
-        # 1. Clean noise but preserve letters for operator keywords and math symbols
-        clean_text = re.sub(r'[^a-zA-Z0-9*+\-/\s]', '', text).lower()
+        
+        # 1. Strip ALL punctuation. Only keep letters, numbers, and spaces.
+        # This prevents Moltbook's random noise symbols (/, -, *, +) from triggering the wrong math operation.
+        clean_text = re.sub(r'[^a-zA-Z0-9\s]', ' ', text).lower()
+        
         number_map = {
             "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
             "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
@@ -191,18 +245,14 @@ class MoltbookClient:
 
         def extract_nums(raw_text):
             found = []
-            # Extract raw digits
             for m in re.finditer(r'\d+', raw_text):
                 found.append((m.start(), int(m.group())))
 
-            # Fragment-resilient word matching
             temp = raw_text
             for word, val in sorted(number_map.items(), key=lambda x: len(x[0]), reverse=True):
-                # Matches characters with potential whitespace noise between them
                 pattern = r'\b' + r'\s*'.join(re.escape(c) for c in word) + r'\b'
                 for m in re.finditer(pattern, temp):
                     found.append((m.start(), val))
-                    # Blank out matched area to prevent double counting
                     temp = temp[:m.start()] + " " * (m.end() - m.start()) + temp[m.end():]
 
             # Sort and merge tens+units (e.g., 20, 3 -> 23)
@@ -225,25 +275,62 @@ class MoltbookClient:
         if not nums:
             return 0.0
 
-        # Upgraded Operator Detection Matrix
-        if any(k in clean_text for k in ['/', 'divide', 'divided by', 'over', 'half', 'split']):
+        # 2. Operator Detection (Words ONLY, no symbols)
+        words = clean_text.split()
+        if any(k in words for k in ['divide', 'divided', 'over', 'half', 'split']):
             return float(nums[0] / nums[1]) if len(nums) >= 2 and nums[1] != 0 else float(nums[0])
-        elif any(k in clean_text for k in ['*', 'times', 'multiply', 'multiplied', 'claws', 'each']):
+        elif any(k in words for k in ['times', 'multiply', 'multiplied', 'product', 'claws', 'each']):
             return float(nums[0] * nums[1]) if len(nums) >= 2 else float(nums[0])
-        elif any(k in clean_text for k in ['-', 'minus', 'reduces', 'decreases', 'subtracted', 'subtract']):
+        elif any(k in words for k in ['minus', 'reduces', 'decreases', 'subtracted', 'subtract', 'lost', 'loses']):
             return float(nums[0] - nums[1]) if len(nums) >= 2 else float(nums[0])
         else:
-            # Default to Addition
+            # Default to Addition (plus, gains, total, added, combined, etc.)
             return float(sum(nums))
 
     def verify_content(self, verification: Dict[str, Any]) -> Dict[str, Any]:
+        # CIRCUIT BREAKER: Halt before hitting the 10-failure suspension limit
+        if getattr(self, "consecutive_verify_failures", 0) >= 8:
+            raise RuntimeError(
+                "CIRCUIT BREAKER TRIGGERED: 8 consecutive verification failures detected. "
+                "Halting operations to prevent automatic Moltbook account suspension."
+            )
+
         challenge_text = verification.get("challenge_text", "")
-        answer = self.solve_challenge(challenge_text)
-        print(f"\n[MATH VERIFIER ACTIVATED] Challenge: '{challenge_text}' | Answer: {answer:.2f}\n")
-        return self._post("/verify", {
-            "verification_code": verification.get("verification_code"),
-            "answer": f"{answer:.2f}",
-        })
+        v_code = verification.get("verification_code")
+        
+        final_answer = None
+
+        # ATTEMPT 1: Local execution of 3rd-party solver
+        if _ext_calculate_answer is not None:
+            try:
+                ans = _ext_calculate_answer(challenge_text)
+                if ans is not None:
+                    final_answer = float(ans)
+                    print(f"\n[MATH VERIFIER] Primary Solver calculated: {final_answer:.2f}")
+            except Exception as e:
+                print(f"\n[MATH VERIFIER] Primary solver crashed locally ({e}). Initiating local fallback...")
+
+        # ATTEMPT 2: Local fallback to Legacy Matrix Solver if primary failed
+        if final_answer is None:
+            final_answer = self.solve_challenge_legacy(challenge_text)
+            print(f"\n[MATH VERIFIER] Legacy Solver calculated: {final_answer:.2f}")
+
+        # ONE-SHOT API SUBMISSION
+        try:
+            response = self._post("/verify", {
+                "verification_code": v_code,
+                "answer": f"{final_answer:.2f}",
+            })
+            # Reset the consecutive failure counter on a successful 200 OK
+            self.consecutive_verify_failures = 0
+            return response
+            
+        except Exception as e:
+            # If Moltbook returns 400 Incorrect Answer, track the failure
+            if "400" in str(e) or "Incorrect answer" in str(e):
+                self.consecutive_verify_failures = getattr(self, "consecutive_verify_failures", 0) + 1
+                print(f"   [!] Verification failed. Consecutive rolling failures: {self.consecutive_verify_failures}/10")
+            raise e
 
     def list_submolt_posts(self, submolt_name: str, limit: int = 20) -> List[Dict[str, Any]]:
         data = self._get(f"/submolts/{submolt_name}/feed?sort=new&limit={limit}")
@@ -257,19 +344,37 @@ class MoltbookClient:
         })
         post = data.get("post", {})
         if post.get("verification_status") == "pending" and post.get("verification"):
-            self.verify_content(post["verification"])
+            try:
+                self.verify_content(post["verification"])
+            except Exception as e:
+                print(f"WARN: Post created but verification challenge failed: {e}")
+
         return str(post.get("id"))
 
     def comment_on_post(self, post_id: str, content: str, parent_id: Optional[str] = None) -> Dict[str, Any]:
-        """Supports hierarchical child replies by passing an optional parent_id node parameter."""
+        """Supports hierarchical child replies with robust challenge extraction."""
         payload = {"content": content}
         if parent_id:
-            payload["parent_id"] = parent_id
+            payload["parent_id"] = str(parent_id)
 
         data = self._post(f"/posts/{post_id}/comments", payload)
-        comment = data.get("comment", {})
-        if comment.get("verification_status") == "pending" and comment.get("verification"):
-            self.verify_content(comment["verification"])
+        # Extract verification challenge from any known response structure
+        comment = data.get("comment", {}) if isinstance(data.get("comment"), dict) else {}
+        verification = (
+            data.get("verification") 
+            or comment.get("verification") 
+            or (data if "verification_code" in data else None)
+        )
+        status = data.get("verification_status") or comment.get("verification_status")
+
+        if verification and "verification_code" in verification:
+            # Isolate verification failures from crashing the caller
+            try:
+                self.verify_content(verification)
+            except Exception as e:
+                print(f"WARN: Comment pending but verification failed natively: {e}")
+        elif status == "pending":
+            print(f"WARN: Comment pending verification but missing payload structure: {data}")
         return data
 
 class MyceliumClient:
@@ -387,23 +492,26 @@ Scenario:
 You will negotiate using below-mentioned perspectives.
 
 Agent lenses:
-- financeguard: affordability, debt load, scholarship value, ROI, financial downside.
-- careermax: career outcomes, alumni network, job access, internships, major fit.
-- studentlife: experience, city life, campus culture, personal growth.
-- riskanalyst: uncertainty, fallback plans, worst-case scenarios, family constraints.
+- financeguard: Focus ONLY on zero/low debt, out-of-pocket costs, and basic affordability.
+- careermax: Focus ONLY on employment placement, internship access, and alumni networks.
+- studentlife: Focus ONLY on campus fit, personal growth, and student quality of life.
+- riskanalyst: Focus ONLY on scholarship renewal terms (GPA) and emergency contingency funds.
 
 Goal:
 Evaluate this topic, reach a consensus, and produce a practical recommendation.
 
 Rules:
-- Do not run mycelium watch.
-- Do not run mycelium session await.
-- Do not run mycelium negotiate status.
-- Only run the exact negotiate command from the current tick.
-- Use exact option values only.
-- If 'mycelium' command is needed, run 'mycelium' directly.
-- Whenever you use the mycelium negotiate command, you MUST include your specific --handle <your_name> and --room {cfg.mycelium_room}.
-
+- STRICT ROLE ISOLATION: Vote ONLY on terms directly within your assigned domain. Never evaluate, police, or reject an offer based on another agent's criteria (e.g. studentlife must NOT block on emergency funds or salaries; careermax must NOT block on family financial ceilings).
+- NO EXTERNAL ACTORS: There is NO outside university representative, admissions dean, or external document source. Do NOT roleplay emailing or waiting on outside verification. The options in the current offer are the ONLY facts that exist.
+- DISCRETE SCHEMA ACCEPTANCE: Do not demand custom unlisted figures (e.g., demanding $15k instead of $5k, or $60k salaries). Accept the best-matching option available in the table.
+- CONVERGENCE PRIORITY: Your primary objective is to reach a consensus agreement within 5 rounds.
+- CLI Rules:
+    - Do not run mycelium watch, mycelium session await, or mycelium negotiate status.
+    - Do NOT attempt to run pip, uv, virtualenv, or reinstall packages if a command fails.
+    - Only run the exact negotiate command from the current tick.
+    - Use exact option values only.
+    - If 'mycelium' command is needed, run 'mycelium' directly.
+    - Whenever you use the mycelium negotiate command, you MUST include your specific --handle <your_name> and --room {cfg.mycelium_room}.
 """.strip()
 
 def kickoff_comment() -> str:
@@ -504,15 +612,45 @@ class MoltbookMyceliumBridge:
       }
 
     def poll_for_summary(self, topic: Dict[str, Any], post_id: str) -> Dict[str, Any]:
-        """Wait for the exact coordination session; never infer completion from room traffic."""
+        """Wait for the coordination session."""
         started = time.time()
         coordination_session_id = getattr(self, "current_coordination_session_id", None)
         if not coordination_session_id:
-            raise ValueError("No current coordination_session_id was recorded")
+            return {
+                "topic": topic,
+                "room": self.cfg.mycelium_room,
+                "coordination_session_id": "none",
+                "session": {},
+                "plan": None,
+                "messages": [],
+                "expected_agents": list(self.cfg.agent_handles),
+                "status": "session_failed_no_session_id",
+            }
+
+        consecutive_poll_errors = 0
 
         while True:
             elapsed = time.time() - started
-            session = self.mycelium.get_session(coordination_session_id)
+            try:
+                session = self.mycelium.get_session(coordination_session_id)
+                consecutive_poll_errors = 0
+            except Exception as poll_exc:
+                consecutive_poll_errors += 1
+                print(f"⚠️ Mycelium poll error (attempt {consecutive_poll_errors}/5): {poll_exc}")
+                if consecutive_poll_errors >= 5:
+                    return {
+                        "topic": topic,
+                        "room": self.cfg.mycelium_room,
+                        "coordination_session_id": coordination_session_id,
+                        "session": {},
+                        "plan": None,
+                        "messages": [],
+                        "expected_agents": list(self.cfg.agent_handles),
+                        "status": "session_failed_network_unreachable",
+                    }
+                time.sleep(self.cfg.poll_interval_seconds)
+                continue
+            
             state = str(
                 session.get("state")
                 or session.get("status")
@@ -617,6 +755,107 @@ class MoltbookMyceliumBridge:
                 return topic
         raise ValueError(f"No topic found with id: {post_id}")
 
+    def fetch_proxy_usage(self, api_key: str, user_id: str) -> Dict[str, Any]:
+        """
+        Fetch cumulative spend and token usage from LiteLLM proxy via /user/info using Decimal precision.
+        """
+        if not api_key or not user_id:
+            return {"total_tokens": 0, "spend": Decimal("0.0")}
+        
+        base_litellm_url = os.getenv("LITELLM_URL", "https://litellm.prod.outshift.ai").replace("/v1/chat/completions", "")
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        try:
+            url = f"{base_litellm_url}/user/info?user_id={user_id}"
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                data = response.json().get("user_info", {})
+                spend_val = data.get("spend", 0.0)
+                return {
+                    "total_tokens": data.get("total_tokens", 0),
+                    "spend": Decimal(str(spend_val))
+                }
+            else:
+                print(f"Proxy query returned HTTP {response.status_code}: {response.text[:200]}")
+        except Exception as e:
+            print(f"Proxy query network erro: {e}")
+            
+        return {"total_tokens": 0, "spend": Decimal("0.0")}
+
+    def get_proxy_snapshot(self) -> Dict[str, Dict[str, Any]]:
+        """Captures total user account spend baselines across Key 1 (CE/Summariser) and Key 2 (Hermes Cluster)."""
+        key1 = self.cfg.litellm_api_key
+        user_id_1 = self.cfg.litellm_user_id1
+
+        key2 = self.cfg.litellm_api_key2
+        user_id_2 = self.cfg.litellm_user_id2
+
+        snapshot = {}
+        
+        # Key 1 Baseline (Mycelium CE & Summariser workload)
+        snapshot["key1_cluster"] = self.fetch_proxy_usage(key1, user_id=user_id_1)
+
+        # Key 2 Baseline (Hermes 4-Agent Cluster workload)
+        snapshot["hermes_cluster"] = self.fetch_proxy_usage(key2, user_id=user_id_2)
+
+        # Safeguard null entries
+        for k, v in snapshot.items():
+            if not v or "spend" not in v:
+                snapshot[k] = {"total_tokens": 0, "spend": Decimal("0.0")}
+            
+        return snapshot
+
+    def print_token_audit(self, baseline_snapshot: Dict[str, Dict[str, Any]]):
+        """Calculates and prints micro-cent spend deltas and reverse-engineered token counts."""
+        # 1. Take final snapshot
+        final_snapshot = self.get_proxy_snapshot()
+        
+        # 2. Calculate Key 1 Delta (CE / Sonnet workload)
+        k1_final = final_snapshot.get("key1_cluster", {})
+        k1_base = baseline_snapshot.get("key1_cluster", {})
+        key1_cost = k1_final.get("spend", Decimal("0")) - k1_base.get("spend", Decimal("0"))
+        key1_tokens = k1_final.get("total_tokens", 0) - k1_base.get("total_tokens", 0)
+        
+        if key1_tokens <= 0 and key1_cost > Decimal("0"):
+            key1_tokens = estimate_tokens_from_spend(key1_cost, model_family="sonnet")
+
+        # 3. Calculate Key 2 Delta (Hermes Gemini workload)
+        hermes_final = final_snapshot.get("hermes_cluster", {})
+        hermes_base = baseline_snapshot.get("hermes_cluster", {})
+        hermes_cost = hermes_final.get("spend", Decimal("0")) - hermes_base.get("spend", Decimal("0"))
+        hermes_tokens = hermes_final.get("total_tokens", 0) - hermes_base.get("total_tokens", 0)
+        
+        if hermes_tokens <= 0 and hermes_cost > Decimal("0"):
+            hermes_tokens = estimate_tokens_from_spend(hermes_cost, model_family="gemini")
+            
+        grand_total_tokens = key1_tokens + hermes_tokens
+        grand_total_cost = key1_cost + hermes_cost
+
+        # Apportion Hermes Cluster Usage equally among the 4 agent handles for the UI report
+        agent_handles = getattr(self.cfg, "agent_handles", ["financeguard", "careermax", "studentlife", "riskanalyst"])
+        num_agents = Decimal(str(len(agent_handles))) if agent_handles else Decimal("4")
+        
+        per_agent_cost = hermes_cost / num_agents if hermes_cost > Decimal("0") else Decimal("0")
+        per_agent_tokens = hermes_tokens // int(num_agents) if hermes_tokens > 0 else 0
+        
+        # 4. Print Report
+        print("\n" + "="*80)
+        print(" 📊 SESSION RUN TOKEN & COST BREAKDOWN (DELTA TRACKING)")
+        print("="*80)
+        print(f" [User Key 1] Mycelium CE & Summariser : ~{key1_tokens:,} tokens | ${key1_cost:.8f}")
+        print("-" * 80)
+        print(f" [User Key 2] 4 Hermes Agents (gemini)  : ~{hermes_tokens:,} tokens | ${hermes_cost:.8f}")
+        
+        for agent in agent_handles:
+            print(f"   ├─ {agent:<20}                  : ~{per_agent_tokens:,} tokens | ${per_agent_cost:.8f}")
+            
+        print("="*80)
+        print(f" GRAND TOTAL FOR THIS ORCHESTRATION LOOP")
+        print(f" TOKENS CONSUMED: ~{grand_total_tokens:,}  |  TOTAL COST: ${grand_total_cost:.8f}")
+        print("="*80 + "\n")
+
     def rerun_topic_by_id(
         self,
         post_id: str,
@@ -629,7 +868,7 @@ class MoltbookMyceliumBridge:
         run_count = int(existing.get("run_count", 0)) + 1
         if self.state.has_seen_topic(post_id) and not force:
             raise ValueError(f"Topic {post_id} was already processed; use force=True")
-
+        baseline_snapshot = self.get_proxy_snapshot()
         self.state.mark_topic(
             post_id,
             status="rerun_picked",
@@ -660,6 +899,9 @@ class MoltbookMyceliumBridge:
             )
 
         payload = self.poll_for_summary(topic, post_id)
+        if payload.get("status") == "session_complete":
+             # Embed the baseline so the publisher can calculate the delta
+             payload["baseline_snapshot"] = baseline_snapshot
         if payload.get("status") != "session_complete":
             self.state.mark_topic(
                 post_id,
@@ -700,8 +942,12 @@ class MoltbookMyceliumBridge:
         Extracts isolated agent outputs and posts them as nested sub-replies.
         Includes a console-print safeguard for demo purposes.
         """
-        # 1. Digest raw telemetry via the LiteLLM extraction block
-        summary = self.summarize_consensus_for_moltbook(consensus_payload)
+        parent_comment_id: Optional[str] = None
+        # 1. Create a clean payload copy for the LLM summarizer without proxy metadata
+        llm_payload = {k: v for k, v in consensus_payload.items() if k != "baseline_snapshot"}
+
+        # Digest raw telemetry via the LiteLLM extraction block
+        summary = self.summarize_consensus_for_moltbook(llm_payload)
         consensus_text = summary.get("consensus_outcome", "").strip()
         agent_comments = summary.get("agent_comments", [])
 
@@ -719,13 +965,12 @@ class MoltbookMyceliumBridge:
             print(item.get('comment'))
         print("="*70 + "\n")
 
-        # 2. Publish Primary Core Summary under Root Client Identity
+        # Publish Primary Core Summary under Root Client Identity
         root_comment_content = f"### Negotiation Consensus Summary\n\n{consensus_text}"
-        print("Attempting to publish primary root consensus node to Moltbook...")
 
         try:
+            print("Attempting to publish primary root consensus node to Moltbook...")
             root_response = self.moltbook.comment_on_post(post_id=post_id, content=root_comment_content)
-
             # 3. Pull out the assigned comment ID to anchor the threaded tree
             parent_comment_id = root_response.get("comment", {}).get("id")
             if not parent_comment_id:
@@ -736,49 +981,53 @@ class MoltbookMyceliumBridge:
             print(f"Root comment created (ID: {parent_comment_id}). Waiting 12s for Moltbook search index to propagate...")
             time.sleep(12.0)
 
-            # 4. Initialize separate tokens from offline provisioning block
-            agent_token_map = {
-                "financeguard": os.getenv("MOLTBOOK_API_KEY_FINANCEGUARD"),
-                "careermax": os.getenv("MOLTBOOK_API_KEY_CAREERMAX"),
-                "studentlife": os.getenv("MOLTBOOK_API_KEY_STUDENTLIFE"),
-                "riskanalyst": os.getenv("MOLTBOOK_API_KEY_RISKANALYST")
-            }
-
-            # 5. Cycle through parsed perspectives and post child replies using isolated credentials
-            for item in reversed(agent_comments):
-                raw_handle = item.get("agent", "").lower().strip().replace("_agent", "")
-                comment_body = item.get("comment", "").strip()
-
-                if not raw_handle or not comment_body:
-                    continue
-
-                specific_token = agent_token_map.get(raw_handle)
-                if specific_token:
-                    identity_client = MoltbookClient(
-                        api_key=specific_token,
-                        base_url=self.cfg.moltbook_base_url,
-                        verify_ssl=self.moltbook.verify_ssl
-                    )
-                else:
-                    identity_client = self.moltbook
-
-                formatted_reply = comment_body
-
-                try:
-                    print(f"Publishing child node reply for agent identity: [{raw_handle}]...")
-                    identity_client.comment_on_post(
-                        post_id=post_id,
-                        content=formatted_reply,
-                        parent_id=parent_comment_id
-                    )
-                    time.sleep(6.0)
-                except Exception as e:
-                    print(f"Failed to post independent identity reply for {raw_handle}: {e}")
-
         except Exception as e:
             # Catch the 400 Incorrect Answer error so the Colab cell finishes gracefully!
-            print(f"\n[DEMO WARNING] Moltbook posting failed (Verification/CAPTCHA error): {e}")
+            print(f"\n[DEMO WARNING] Moltbook Root comment posting failed (Verification/CAPTCHA error): {e}")
             print("The consensus was successfully generated and printed above.")
+
+        # Post Agent Sub-replies even if root comment posting had an issue
+        agent_token_map = {
+            "financeguard": os.getenv("MOLTBOOK_API_KEY_FINANCEGUARD"),
+            "careermax": os.getenv("MOLTBOOK_API_KEY_CAREERMAX"),
+            "studentlife": os.getenv("MOLTBOOK_API_KEY_STUDENTLIFE"),
+            "riskanalyst": os.getenv("MOLTBOOK_API_KEY_RISKANALYST")
+        }
+
+        for item in reversed(agent_comments):
+            raw_handle = item.get("agent", "").lower().strip().replace("_agent", "")
+            comment_body = item.get("comment", "").strip()
+
+            if not raw_handle or not comment_body:
+                continue
+
+            specific_token = agent_token_map.get(raw_handle)
+            if specific_token:
+                identity_client = MoltbookClient(
+                    api_key=specific_token,
+                    base_url=self.cfg.moltbook_base_url,
+                    verify_ssl=self.moltbook.verify_ssl
+                )
+            else:
+                identity_client = self.moltbook
+
+            try:
+                print(f"Publishing child node perspective for agent identity: [{raw_handle}]...")
+                identity_client.comment_on_post(
+                    post_id=post_id,
+                    content=comment_body,
+                    parent_id=parent_comment_id
+                )
+                time.sleep(6.0)
+            except Exception as e:
+                print(f"Failed to post independent identity reply for {raw_handle}: {e}")
+
+        # summarizer_token_count = summary.get("token_usage", {}).get("total_tokens", 0)
+        # self.print_token_audit(summarizer_tokens=summarizer_token_count)
+
+        # Trigger token and cost audit right before returning
+        baseline_snapshot = consensus_payload.get("baseline_snapshot", {})
+        self.print_token_audit(baseline_snapshot=baseline_snapshot)
 
         return summary
 
@@ -799,7 +1048,10 @@ def make_config_from_env() -> BridgeConfig:
         mycelium_room=env_or("MYCELIUM_ROOM", defaults.mycelium_room),
         mycelium_sender_handle=env_or("MYCELIUM_SENDER", defaults.mycelium_sender_handle),
         state_path=env_or("BRIDGE_STATE_PATH", defaults.state_path),
-        litellm_api_key=os.getenv("LITELLM_API_KEY", ""),           
+        litellm_api_key=os.getenv("LITELLM_API_KEY", ""),
+        litellm_user_id1=os.getenv("LITELLM_USER_ID1", ""),
+        litellm_api_key2=os.getenv("LITELLM_API_KEY2", ""),
+        litellm_user_id2=os.getenv("LITELLM_USER_ID2", ""),         
         litellm_model=env_or("LITELLM_MODEL", defaults.litellm_model),
         scenario_facts=env_or("SCENARIO_FACTS", defaults.scenario_facts),
     )
