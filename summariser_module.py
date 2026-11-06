@@ -62,7 +62,7 @@ EDGE CASES:
 
 def build_user_prompt(consensus_payload: Any) -> str:
     if isinstance(consensus_payload, (dict, list)):
-        payload_text = json.dumps(consensus_payload, ensure_ascii=False, indent=2)
+        payload_text = json.dumps(consensus_payload, default=str, ensure_ascii=False, indent=2)
     else:
         payload_text = str(consensus_payload)
 
@@ -186,6 +186,15 @@ def summarize_for_moltbook(
         raise ValueError(f"LiteLLM response content is empty: {json.dumps(data)[:3000]}")
 
     result = _parse_model_json(content)
+
+    usage_data = data.get("usage", {})
+    result["token_usage"] = {
+        "prompt_tokens": usage_data.get("prompt_tokens", 0),
+        "completion_tokens": usage_data.get("completion_tokens", 0),
+        "total_tokens": usage_data.get("total_tokens", 0),
+        "model": model
+    }
+
     if "consensus_outcome" not in result:
         raise ValueError("Missing 'consensus_outcome' in model output")
     if "agent_comments" not in result:
