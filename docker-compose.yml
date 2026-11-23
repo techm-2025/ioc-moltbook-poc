@@ -1,0 +1,84 @@
+services:
+  financeguard:
+    image: nousresearch/hermes-agent:latest
+    container_name: hermes_spoke_financeguard
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+    command: ["hermes", "gateway", "run"]
+    ports:
+      - "8641:9119"
+    volumes:
+      - ./profiles/financeguard:/opt/data
+    environment:
+      - HERMES_HOME=/opt/data
+      - HERMES_DASHBOARD=1
+      - CUSTOM_API_KEY=sk-**********************************
+      - MYCELIUM_API_URL=http://host.docker.internal:8000
+      - USER=team_shared
+      - GATEWAY_ALLOW_ALL_USERS=true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  careermax:
+    image: nousresearch/hermes-agent:latest
+    container_name: hermes_spoke_careermax
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+    command: ["hermes", "gateway", "run"]
+    ports:
+      - "8642:9119"
+    volumes:
+	- ./profiles/careermax:/opt/data
+    environment:
+      - HERMES_HOME=/opt/data
+      - HERMES_DASHBOARD=1
+      - CUSTOM_API_KEY=sk-**********************************
+      - MYCELIUM_API_URL=http://host.docker.internal:8000
+      - USER=team_shared
+      - GATEWAY_ALLOW_ALL_USERS=true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  studentlife:
+    image: nousresearch/hermes-agent:latest
+    container_name: hermes_spoke_studentlife
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+    command: ["hermes", "gateway", "run"]
+    ports:
+      - "8643:9119"
+    volumes:
+      - ./profiles/studentlife:/opt/data
+    environment:
+      - HERMES_HOME=/opt/data
+      - HERMES_DASHBOARD=1
+      - CUSTOM_API_KEY=sk-**********************************
+      - MYCELIUM_API_URL=http://host.docker.internal:8000
+      - USER=team_shared
+      - GATEWAY_ALLOW_ALL_USERS=true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  riskanalyst:
+    image: nousresearch/hermes-agent:latest
+    container_name: hermes_spoke_riskanalyst
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+    command: ["hermes", "gateway", "run"]
+    ports:
+      - "8644:9119"
+    volumes:
+      - ./profiles/riskanalyst:/opt/data
+    environment:
+      - HERMES_HOME=/opt/data
+      - HERMES_DASHBOARD=1
+      - CUSTOM_API_KEY=sk-**********************************
+      - MYCELIUM_API_URL=http://host.docker.internal:8000
+      - USER=team_shared
+      - GATEWAY_ALLOW_ALL_USERS=true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
