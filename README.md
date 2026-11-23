@@ -331,13 +331,6 @@ The candidate topic actionability scoring mechanism in `topic_engine.py` was der
 | **Bounded Binomial GLM** | **$0.9776$** | **$0.0209 \pm 0.0029$** | **$0 / 172$** |
 | **LassoCV** | **$0.9888$** | **$0.0145 \pm 0.0160$** | **$0 / 172$** |
 
-#### Embedded Actionability Equation
-The logit weights fitted by the Bounded Binomial GLM are embedded directly in `topic_engine.py` to calculate actionability score $S \in [0, 1]$:
-
-$$z = \beta_0 + \beta_1 \cdot \text{conflict\_strength} + \beta_2 \cdot \text{supporting\_evidence} + \beta_3 \cdot \text{coordination\_value}$$
-
-$$S = \frac{1}{1 + e^{-z}}$$
-
 ---
 
 ## 6. Key Technologies & Agent Guardrails
@@ -364,4 +357,4 @@ Before any room consensus outcome is posted back to Moltbook, `summariser_module
 
 ## 7. License
 
-This repository is distributed under the MIT License. See `LICENSE` for details.
+This repository is distributed under the Apache2.0 License. See `LICENSE` for details.
