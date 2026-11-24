@@ -1,15 +1,16 @@
-# IoC-Moltbook PoC: Autonomous multi-agent topic discovery & governance control plane
+# IoC-Moltbook PoC: Moltbook Integration and Autonomous multi-agent topic discovery
 
-`ioc-moltbook-poc` - This is a collection of prototypes to bring the IoC capabilities to the Moltbook world. We started our journey with the integration of [**Moltbook**](#https://www.moltbook.com) (a decentralized social platform) with **Mycelium** (an agent negotiation platform). It bridges these two platforms using **Hermes Agents** to execute multi-agent validation, and automated consensus publishing. Then we transformed it into a governed negotiation prototype by building an autonomous topic mining, scoring and governance pipeline.
+This is a collection of prototypes to bring the IoC capabilities to the Moltbook world. We started our journey with the integration of [**Moltbook**](#https://www.moltbook.com) (a decentralized social platform) with **Mycelium** (an agent negotiation platform). It bridges these two platforms using **Hermes Agents** to execute multi-agent validation and automated consensus publishing. Then we transformed the prototype into a governed negotiation prototype by building an autonomous topic mining, scoring and governance pipeline.
 
 ---
 
 ## 📋 Table of Contents
 
+* [0. Example Moltbook post](#0-example-moltbook-post)
 * [1. Architecture Evolution & Flow](#1-architecture-evolution--flow)
-  * [Phase 1: Reactive Moltbook–Mycelium Bridge](#phase-1-reactive-moltbookmycelium-bridge)
-  * [Phase 2: Autonomous Topic Mining (ATM Control Plane)](#phase-2-autonomous-topic-mining-atm-control-plane)
-  * [System Architecture Diagrams](#system-architecture-diagrams)
+  * [Phase 1: Moltbook–Mycelium Bridge](#phase-1-moltbook-mycelium-bridge)
+  * [Phase 2: Autonomous Topic Mining](#phase-2-autonomous-topic-mining)
+  * [System Flow Diagrams](#system-flow-diagrams)
 * [2. Project Structure](#2-project-structure)
 * [3. Prerequisites & Environment Variables](#3-prerequisites--environment-variables)
   * [Infrastructure Requirements](#infrastructure-requirements)
@@ -30,30 +31,39 @@
 
 ---
 
+## 0. Example Moltbook post
+
+This sample post has been used as input in the Phase 1 experiments.
+### Post title: 
+NYU no aid vs ASU scholarship
+### Post content: 
+Evaluate whether a student should choose NYU with no aid or Arizona State with a $25000/year scholarship.
+
 ## 1. Architecture Evolution & Flow
 
-### Phase 1: Reactive Moltbook–Mycelium Bridge
-Phase 1 implements a hub-and-spoke multi-agent system where four isolated Hermes agents—`financeguard`, `careermax`, `studentlife`, and `riskanalyst`—are deployed inside containerized spokes managed by Docker Compose. The bridge service (`bridge_service.py`):
-1. Polls specified Submolts on Moltbook for user posts and mathematical verification challenges.
+### Phase 1: Moltbook–Mycelium Bridge 
+Phase 1 implements a hub-and-spoke multi-agent system where four isolated Hermes agents—`financeguard`, `careermax`, `studentlife`, and `riskanalyst`—are deployed inside containerized spokes managed by a Docker compose and triggered via the Google Colab orchestrator (`Moltbook_Mycelium_bridge_svc_orchestrator.ipynb`. The bridge service (`bridge_service.py`):
+1. Polls specified submolts on Moltbook for user posts and mathematical verification challenges via Moltbook REST API endpoints.
 2. Solves automated math challenges to post messages and create threads.
-3. Coordinates real-time agent room sessions over Mycelium CLI (`v1.1.3`).
-4. Summarizes room dialogues and posts consensus results back to Moltbook.
+3. Coordinates real-time agent room sessions over Mycelium REST API endpoints (`v1.1.3`).
+4. Summarizes room dialogues, synthesizes consensus outcomes into public-safe JSON (`consensus_outcome` + 4 direct-voice `agent_comments`) via `summariser_module.py` and posts nested multi-account threads back to the originating submolt.
+For testing, refer the sources from this [commit](https://github.com/techm-2025/ioc-moltbook-poc/commit/4f347167666de8f7bb2394a2a9d48610d5a8d639).
 
-### Phase 2: Autonomous Topic Mining (ATM Control Plane)
-Phase 2 shifts the system from human-triggered sessions to a fully autonomous, 13-stage pipeline executed via `topic_engine.py` and the Google Colab orchestrator (`Moltbook_Mycelium_bridge_svc_orchestrator.ipynb`):
+### Phase 2: Autonomous Topic Mining
+Phase 2 shifts the system from human-triggered sessions to a fully autonomous, 13-stage pipeline executed via `topic_engine.py`:
 * **Stage 1 (Ingestion):** Ingests live Moltbook streams or local JSON datasets (`structured_conversation.json`).
-* **Stage 2 (Topic Discovery):** Extracts candidate topics using slide-window boundary clustering.
+* **Stage 2 (Topic Discovery):** Extracts candidate topics.
 * **Stage 3 (Semantic Enrichment):** Maps context, facts, and participant intents.
-* **Stage 4 (Actionability & Score Calculation):** Computes a 3-dimensional Generalized Linear Model (GLM) logit score based on empirical offline evaluation.
+* **Stage 4 (Actionability & Score Calculation):** Computes a 3-dimensional score.
 * **Stage 5 (Ranking & Selection):** Ranks candidate topics by actionability score.
 * **Stage 6 (Deduplication):** Removes redundant topics using semantic similarity thresholds.
 * **Stage 7 (Multi-Agent Validation):** Dispatches candidates to virtual agents for preliminary checks.
 * **Stage 8 (NegMAS Unanimous Governance Gate):** Enforces a strict unanimous voting policy across all 4 agents before topic approval.
 * **Stage 9 (Candidate Intelligence Output):** Finalizes approved candidate topic metadata.
 * **Stage 10 (Mission Compilation):** Formats approved topics into structured negotiation missions.
-* **Stage 11 (Mycelium Negotiation Execution):** Spawns Mycelium sessions and coordinates agent discussions across ports `8641–8644`.
+* **Stage 11 (Mycelium Negotiation Execution):** Spawns Mycelium sessions and coordinates agent discussions.
 * **Stage 12 (Session Auditing):** Audits token consumption and message trace integrity.
-* **Stage 13 (Summarization & Publishing):** Synthesizes consensus outcomes into public-safe JSON (`consensus_outcome` + 4 direct-voice `agent_comments`) via `summariser_module.py` and posts nested multi-account threads back to Moltbook.
+* **Stage 13 (Summarization & Publishing):** Synthesizes consensus outcomes and posts back to Moltbook.
 
 ### System Flow Diagrams
 
@@ -61,7 +71,7 @@ Phase 2 shifts the system from human-triggered sessions to a fully autonomous, 1
 ```
 +------------------+         +-----------------------+         +--------------------+
 |  Moltbook Stream |  Poll   |   bridge_service.py   |  Spawn  |  Mycelium Room     |
-|   (Submolts)     | ------> |   (Central Hub)       | ------> |  Session (CLI)     |
+|   (Submolts)     | ------> |   (Central Hub)       | ------> |  Session     |
 +------------------+         +-----------------------+         +--------------------+
                                          |                               |
                                   Solves Challenges               4 Hermes Agents
@@ -124,16 +134,32 @@ Phase 2 shifts the system from human-triggered sessions to a fully autonomous, 1
 ioc-moltbook-poc/
 ├── README.md                                                       
 ├── requirements.txt                                                
-├── .gitignore                                                       
+├── .gitignore
 │
+├── System flow diagrams                                                       
+│   ├── Flow diagrams
+│       ├── Phase 1.svg
+│       ├── Phase 2.svg
+|
 ├── Core Pipeline & Orchestration
-│   ├── Moltbook_Mycelium_bridge_svc_orchestrator.ipynb             # Main 13-stage Colab orchestrator notebook
+│   ├── Moltbook_Mycelium_bridge_svc_orchestrator.ipynb             # Colab orchestrator notebook
 │   ├── bridge_service.py                                           # Central bridge hub, clients, & state manager
-│   ├── topic_engine.py                                             # ATM Control Plane (Stages 1-9 & GLM scoring)
+│   ├── topic_engine.py                                             # ATM Control Plane (Pipeline Stages & scoring)
 │   └── summariser_module.py                                        # Public-safe consensus summary generator
 │
+├── Agent Persona and behaviour instructions                                                       
+│   ├── hermes_agent_persona_prompts
+│       ├── careermax
+|           ├── SOUL.md
+│       ├── financeguard
+|           ├── SOUL.md
+|       ├── riskanalyst
+|           ├── SOUL.md
+│       ├── studentlife
+|           ├── SOUL.md
+|
 ├── Infrastructure & Deployment
-│   ├── docker-compose.yml                                          # 4-spoke Hermes agent container definition
+│   ├── docker-compose.yml                                          # 4-spoke Hermes agent container definition (keep it at the root of `hermes_network/` directory)
 │   └── prep_hermes_environment.sh                                  # WSL environment cleanup, patch & boot script
 │
 ├── Experiments & Operational Benchmarks
@@ -158,10 +184,10 @@ ioc-moltbook-poc/
 ## 3. Prerequisites & Environment Variables
 
 ### Infrastructure Requirements
-* **Operating System:** Windows Subsystem for Linux (WSL2, Ubuntu 22.04 LTS recommended) or Linux.
-* **Containers & Orchestration:** Docker Engine `v24.0+` and Docker Compose `v2.20+`.
+* **Operating System:** Windows Subsystem for Linux (WSL2, `Ubuntu 24.04.0+ LTS` recommended) or Linux.
+* **Containers & Orchestration:** Docker Engine `v29.0+` and Docker Compose `v5.0+`.
 * **Platform CLIs:** Mycelium CLI `v1.1.3` (`mycelium-cli`).
-* **Tunneling:** Cloudflare Tunnel (`cloudflared`).
+* **Tunneling:** Cloudflare Tunnel (`cloudflared version 2026.6.0`).
 * **Execution Environment:** Google Colab (for running the orchestrator notebook).
 
 ### Environment Variables & Colab Secrets
@@ -188,8 +214,8 @@ ioc-moltbook-poc/
 | `MYCELIUM_ROOM` | `moltbook-mycelium-demo` | Active Mycelium room identifier |
 | `MYCELIUM_SENDER` | `bridge_orchestrator` | Originator ID for bridge messages |
 | `LITELLM_URL` | `http://<host>:4000` | LiteLLM Proxy endpoint |
-| `LITELLM_MODEL` | `gpt-4o-mini` | LLM model identifier |
-| `USE_LOCAL_JSON` | `"True"` | Toggles Demo mode using local payload |
+| `LITELLM_MODEL` | `gpt-4o-mini` | LLM identifier |
+| `USE_LOCAL_JSON` | `"True"` | Toggles demo mode using local payload |
 | `TARGET_POST_ID` | `post_98765` | Direct post override for publishing |
 
 ### Security Guidelines
@@ -208,26 +234,50 @@ Execute the following commands in your WSL terminal to install and configure Myc
 # Install Mycelium CLI v1.1.3
 curl -fsSL https://mycelium-io.github.io/mycelium/install.sh | bash -s -- --version 1.1.3
 
-# Initialize and verify Mycelium installation
+# Initialize, verify and fix any issue - Mycelium installation
 mycelium install
 mycelium up
+mycelium status
 mycelium doctor
+mycelium doctor -fix
+mycelium --version
 
 # Create and select the working negotiation room
-mycelium room create moltbook-mycelium-demo
-mycelium room select moltbook-mycelium-demo
+mycelium room create <room>
+mycelium room use <room>
 
-# Optional: Launch local Mycelium frontend UI
+# Launch Mycelium frontend UI
 docker run -d --name mycelium-frontend -p 3000:3000 --network mycelium_default -e MYCELIUM_INTERNAL_API_URL=http://mycelium-backend:8000 ghcr.io/mycelium-io/mycelium-frontend:latest
+
+# Check room details in JSON format
+mycelium --json room ls --name "<room>"
+
+# Check registered agents inside a room
+mycelium agent ls --room "<room>"
+
+# To monitor room events
+mycelium room watch "<room>"
+
+# To stop Mycelium
+mycelium down
+
+# To see workspace details
+curl -s http://localhost:9000/api/workspaces | jq
+
+# Check MAS id and Workspace ID of a room
+curl -s "http://localhost:8000/api/rooms?name=<room>&limit=1"   | jq '.[0] | {name, mas_id, workspace_id}'
+
+# For other CLI commands
+mycelium --help
 ```
 
 ### Step 2: Expose Mycelium via Cloudflare tunnel
-To allow the Google Colab orchestrator to reach your local Mycelium daemon, launch a Cloudflare tunnel targeting port `8000`:
+To allow the Google Colab runtime to reach your local Mycelium daemon, launch a Cloudflare tunnel targeting port `8000`:
 
 ```bash
-docker run --rm -it cloudflare/cloudflared:latest tunnel --url http://host.docker.internal:8000
+docker run --rm -it cloudflare/cloudflared:2026.6.0 tunnel --url http://host.docker.internal:8000
 ```
-*Copy the generated `https://<random-subdomain>.trycloudflare.com` URL. You will set this as `MYCELIUM_BASE_URL` in Colab.*
+*Copy the generated `https://<random-subdomain/tunnel-id>.trycloudflare.com` URL. You will set this as `MYCELIUM_BASE_URL` in Colab.*
 
 ### Step 3: Deploy Hermes agent spokes
 Run the preparation script to reset state, build containers, inject Mycelium CLI, patch Mycelium-Hermes agent adapters, and launch the Gateway:
@@ -243,10 +293,8 @@ Run the preparation script to reset state, build containers, inject Mycelium CLI
         base_url: https://litellm.prod.outshift.ai
         api_key: sk-**********************
     done
-
-
-chmod +x ~/hermes_network/prep_hermes_environment.sh
-~/hermes_network/prep_hermes_environment.sh
+3) chmod +x hermes_network/prep_hermes_environment.sh
+4) hermes_network/prep_hermes_environment.sh
 ```
 
 This script will spin up four containerized spokes bound to local ports:
@@ -263,13 +311,22 @@ This script will spin up four containerized spokes bound to local ports:
    * `summariser_module.py`
    * `structured_conversation.json` (if running with `USE_LOCAL_JSON="True"`)
 3. Set your secrets in Colab (`LITELLM_API_KEY`, `MOLTBOOK_API_KEY`, etc.).
-4. Execute all notebook cells sequentially to run Stages 1 through 13.
+4. Execute all notebook cells sequentially
 
 ### Configuration & Maintenance Reference
-* **Mycelium Config Files:** `~/.mycelium/config.toml`, `~/.mycelium/.env`
-* **Hermes Config Files:** `~/.hermes/config.yaml`, `~/hermes_network/profiles/<agent>/SOUL.md`
+* **Mycelium Config Files:** 
+First make changes to `~/.mycelium/config.toml` 
+Then check `~/.mycelium/.env` 
+Finally `mycelium config apply` or `mycelium config apply -restart`
+* **To change agent specific budget for Mycelium session:** `~/.mycelium/rooms/<room>/agents/<agent>.md`
+* **To change any docker service level config of the hermes agent instances:** `hermes_network/docker-compose.yml`
+* **Hermes Config Files:** `~/.hermes/config.yaml`, `hermes_network/profiles/<agent>/SOUL.md` (Copy the files from the `hermes_agent_persona_prompts/`)
+* **Hermes commands:** `hermes gateway status` | `hermes gateway start` | `hermes gateway stop` | `hermes gateway restart`
 * **Bridge Persistent State:** `bridge_state.json` (stores post tracking and session history).
-
+* **Cloudfare API monitoring:**
+`curl -v https://api.trycloudflare.com/tunnel` |
+`dig api.trycloudflare.com` |
+`nslookup api.trycloudflare.com`
 ---
 
 ## 5. Observability, Evaluation & Benchmarking
@@ -299,7 +356,7 @@ The candidate topic actionability scoring mechanism in `topic_engine.py` was der
 
 ```
 +-----------------------------------------------------------------------------------+
-| 50 Synthetic Multi-Topic Conversations (31 Events Each)                           |
+| 50 Synthetic Multi-Topic Conversations                          |
 +-----------------------------------------------------------------------------------+
                                          |
                                          v
@@ -336,11 +393,11 @@ The candidate topic actionability scoring mechanism in `topic_engine.py` was der
 ## 6. Key Technologies & Agent Guardrails
 
 ### Key Technologies
-* **Agent Framework:** Hermes Agents (`nousresearch/hermes-agent:latest`)
-* **Negotiation Layer:** Mycelium CLI `v1.1.3`
-* **Social Platform API:** Moltbook REST API
-* **LLM Gateway:** LiteLLM Proxy
-* **Unanimous Voting Engine:** NegMAS (Negotiation Multi-Agent System) integration
+* **Agent Framework:** [Hermes Agents](https://hermes-agent.nousresearch.com/)
+* **Negotiation Layer:** [Mycelium](https://github.com/mycelium-io)
+* **Social Platform API:** [Moltbook Official](https://github.com/Moltbook-Official/moltbook) | [Moltbook API](https://moltbook.apidog.io/) 
+* **LLM Gateway:** OutShift LiteLLM Proxy
+* **Unanimous Voting Engine:** [NegMAS](https://negmas.readthedocs.io/en/latest/)
 * **Modeling & Analytics:** `scikit-learn`, `statsmodels`, `pandas`, `numpy`
 * **Infrastructure:** Docker Compose, WSL2, Cloudflare Tunnels, Google Colab
 
