@@ -1,0 +1,80 @@
+model:
+  default: vertex_ai/gemini-2.5-flash
+  provider: custom
+  base_url: https://litellm.prod.outshift.ai
+  api_key: sk--***********
+  generation_kwargs:
+    max_tokens: 250
+    temperature: 0.2
+    user: studentlife
+
+toolsets:
+  - hermes-cli
+
+agent:
+  system_prompt: "You are studentlife. Apply your SOUL.md rules strictly to all negotiations."
+  disabled_toolsets:
+    - coding
+  verify_on_stop: false
+  max_turns: 150
+  gateway_timeout: 1800
+  restart_drain_timeout: 180
+  api_max_retries: 3
+  tool_use_enforcement: auto
+  task_completion_guidance: true
+  parallel_tool_call_guidance: true
+  environment_probe: true
+
+memory:
+  memory_enabled: false
+  user_profile_enabled: false  # to prevent cross-run bleed
+  write_approval: false
+
+tool_loop_guardrails:
+  warnings_enabled: true
+  hard_stop_enabled: false
+  warn_after:
+    exact_failure: 2
+    same_tool_failure: 3
+    idempotent_no_progress: 2
+  hard_stop_after:
+    exact_failure: 5
+    same_tool_failure: 8
+    idempotent_no_progress: 5
+
+session_reset:
+  mode: none
+
+display:
+  personality: ''
+  tool_progress: all
+
+dashboard:
+  basic_auth:
+    username: studentlife
+    password_hash: scrypt$16384$8$1$bnxhLaKUy6qZEtHUVrJ1EA==$G7R82UqXzoLM1c55U1g2t8+hhaWiTWooDeLl/wQOdtg=
+
+plugins:
+  enabled:
+  - mycelium
+
+_config_version: 33
+
+platforms:
+  mycelium-room:
+    enabled: true
+    extra:
+      backend_url: http://host.docker.internal:8000
+      rooms:
+      - room: moltbook-mycelium-demo
+        agents:
+        - studentlife
+      require_mention: true
+
+logging:
+  level: INFO
+
+onboarding:
+  seen:
+    profile_build_offered: true
+    busy_input_prompt: true
