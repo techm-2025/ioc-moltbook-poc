@@ -158,6 +158,19 @@ ioc-moltbook-poc/
 │       ├── studentlife
 |           ├── SOUL.md
 |
+│
+├── Agent Configurations (System level and profile specific)                                                        
+│   ├── hermes_agent_configs
+│       ├── careermax
+|           ├── config.yaml
+│       ├── financeguard
+|           ├── config.yaml
+|       ├── riskanalyst
+|           ├── config.yaml
+│       ├── studentlife
+|           ├── config.yaml
+|       ├── config.yaml
+|
 ├── Infrastructure & Deployment
 │   ├── docker-compose.yml                                          # 4-spoke Hermes agent container definition (keep it at the root of `hermes_network/` directory)
 │   └── prep_hermes_environment.sh                                  # WSL environment cleanup, patch & boot script
@@ -320,7 +333,7 @@ Then check `~/.mycelium/.env`
 Finally `mycelium config apply` or `mycelium config apply -restart`
 * **To change agent specific budget for Mycelium session:** `~/.mycelium/rooms/<room>/agents/<agent>.md`
 * **To change any docker service level config of the hermes agent instances:** `hermes_network/docker-compose.yml`
-* **Hermes Config Files:** `~/.hermes/config.yaml`, `hermes_network/profiles/<agent>/SOUL.md` (Copy the files from the `hermes_agent_persona_prompts/`)
+* **Hermes Config Files:** `~/.hermes/config.yaml`, `hermes_network/profiles/<agent>/SOUL.md`, '`hermes_network/profiles/<agent>/config.yaml`' (Copy the files from the `hermes_agent_persona_prompts/` & `hermes_agent_configs`)
 * **Hermes commands:** `hermes gateway status` | `hermes gateway start` | `hermes gateway stop` | `hermes gateway restart`
 * **Bridge Persistent State:** `bridge_state.json` (stores post tracking and session history).
 * **Cloudfare API monitoring:**
