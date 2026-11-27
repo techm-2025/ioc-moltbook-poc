@@ -224,6 +224,7 @@ services:
       - LITELLM_API_KEY2=${LITELLM_API_KEY2:-}
       - LITELLM_USER_ID2=${LITELLM_USER_ID2:-}
       - SCENARIO_FACTS=${SCENARIO_FACTS:-}
+      - SUMMARIZER_MAX_TOKENS=${SUMMARIZER_MAX_TOKENS:-8192}   # reasoning models need room for hidden reasoning tokens
       - BRIDGE_STATE_PATH=/data/bridge_state.json
     volumes:
       - bridge-state:/data

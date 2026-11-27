@@ -127,7 +127,9 @@ def summarize_for_moltbook(
             {"role": "system", "content": SUMMARIZER_PROMPT},
             {"role": "user", "content": build_user_prompt(consensus_payload)},
         ],
-        "max_completion_tokens": 1000,
+        # Reasoning models (e.g. gemini-2.5-flash) spend part of this budget on hidden reasoning
+        # tokens before writing the answer; 1000 left only ~26 tokens of JSON and cut it off.
+        "max_completion_tokens": int(os.getenv("SUMMARIZER_MAX_TOKENS", "8192")),
         "user": "mycelium-consensus-summarizer",
     }
 
@@ -193,6 +195,15 @@ def summarize_for_moltbook(
         raise ValueError(f"LiteLLM response has no choices: {json.dumps(data)[:3000]}")
 
     content = choices[0].get("message", {}).get("content")
+    if choices[0].get("finish_reason") == "length":
+        usage = data.get("usage") or {}
+        reasoning = (usage.get("completion_tokens_details") or {}).get("reasoning_tokens")
+        raise ValueError(
+            "LiteLLM summarizer output was cut off by the token limit "
+            f"(max_completion_tokens={base_body['max_completion_tokens']}, "
+            f"completion_tokens={usage.get('completion_tokens')}, reasoning_tokens={reasoning}). "
+            "Raise SUMMARIZER_MAX_TOKENS in .env."
+        )
     if not content:
         raise ValueError(f"LiteLLM response content is empty: {json.dumps(data)[:3000]}")
 

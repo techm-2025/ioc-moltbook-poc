@@ -18,10 +18,23 @@ from http import HTTPStatus
 from summariser_module import summarize_for_moltbook
 
 try:
-    # from solver import calculate_answer as _ext_calculate_answer
-    _ext_calculate_answer = None
+    # solver.py: LLM decoding of Moltbook's obfuscated math challenges + rule-based cross-check.
+    from solver import calculate_answer as _ext_calculate_answer
 except Exception:
     _ext_calculate_answer = None
+
+def _log_verification(challenge_text: str, answer: Any, result: str) -> None:
+    """Append every Moltbook challenge + answer + outcome to a JSONL file, so failed challenges
+    can be added to tests/test_solver.py. Never raises."""
+    path = os.getenv("VERIFY_LOG_PATH") or os.path.join(
+        os.path.dirname(os.getenv("BRIDGE_STATE_PATH", "bridge_state.json")) or ".", "verification_log.jsonl")
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"at": utc_now(), "challenge_text": challenge_text,
+                                 "answer": answer, "result": result}) + "\n")
+    except Exception as exc:
+        print(f"[MATH VERIFIER] could not write {path}: {exc}")
+
 
 RETRYABLE_STATUS_CODES = {
 HTTPStatus.TOO_MANY_REQUESTS,      # 429
@@ -128,8 +141,16 @@ class BridgeState:
             return json.loads(self.path.read_text())
         return {"processed_topics": {}, "submolts": {}}
 
+    @staticmethod
+    def _json_default(obj: Any) -> Any:
+        # session_result carries baseline_snapshot, whose LiteLLM spend values are Decimal
+        # (get_proxy_snapshot). Store them as exact strings; the state file is only a record.
+        if isinstance(obj, Decimal):
+            return str(obj)
+        raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
     def save(self) -> None:
-        self.path.write_text(json.dumps(self.data, indent=2, sort_keys=True))
+        self.path.write_text(json.dumps(self.data, indent=2, sort_keys=True, default=self._json_default))
 
     def has_seen_topic(self, post_id: str) -> bool:
         return str(post_id) in self.data.setdefault("processed_topics", {})
@@ -323,9 +344,11 @@ class MoltbookClient:
             })
             # Reset the consecutive failure counter on a successful 200 OK
             self.consecutive_verify_failures = 0
+            _log_verification(challenge_text, final_answer, "verified")
             return response
             
         except Exception as e:
+            _log_verification(challenge_text, final_answer, f"failed: {str(e)[:200]}")
             # If Moltbook returns 400 Incorrect Answer, track the failure
             if "400" in str(e) or "Incorrect answer" in str(e):
                 self.consecutive_verify_failures = getattr(self, "consecutive_verify_failures", 0) + 1

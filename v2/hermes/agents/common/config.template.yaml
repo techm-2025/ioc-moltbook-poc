@@ -1,4 +1,6 @@
 # Hermes config.yaml template shared by all 4 agents.
+# Settings follow the per-agent configs on the `develop` branch (hermes_agent_configs/<agent>/config.yaml),
+# which are identical apart from the agent name; values that differ per machine come from .env instead.
 # Rendered into each agent's /opt/data/config.yaml on EVERY container boot by hermes/agent-seed.sh:
 #   __AGENT__              -> the agent's MYCELIUM_AGENT_NAME
 #   ${AGENT_LLM_MODEL}     -> from .env (written into config.yaml at boot)
@@ -6,21 +8,79 @@
 #   ${MYCELIUM_ROOM}       -> from .env (written into config.yaml at boot)
 #   ${MYCELIUM_API_URL}    -> from docker-compose.yml (written into config.yaml at boot)
 #   ${CUSTOM_API_KEY}      -> left as-is; Hermes expands it at runtime, so the key is never stored on disk
+# Not taken from develop: the hard-coded model/base_url/api_key (now .env), dashboard.basic_auth
+# (the login comes from HERMES_DASHBOARD_USER/PASSWORD in .env), and _config_version 33 (the
+# installed Hermes 0.23.4 uses 54).
 # Edit this file (not the copy inside the container), then run scripts/apply_agents.sh.
 model:
   default: ${AGENT_LLM_MODEL}        # model name served by the LiteLLM proxy (no "openai/" prefix)
   provider: custom
   base_url: ${AGENT_LLM_BASE_URL}    # e.g. http://host.docker.internal:4000/v1 (containers can't use localhost)
   api_key: ${CUSTOM_API_KEY}
+  generation_kwargs:
+    max_tokens: 250
+    temperature: 0.2
+    user: __AGENT__                  # per-agent attribution in the LiteLLM proxy
+
+toolsets:
+  - hermes-cli
+
+agent:
+  system_prompt: "You are __AGENT__. Apply your SOUL.md rules strictly to all negotiations."
+  disabled_toolsets:
+    - coding
+  verify_on_stop: false
+  max_turns: 150
+  gateway_timeout: 1800
+  restart_drain_timeout: 180
+  api_max_retries: 3
+  tool_use_enforcement: auto
+  task_completion_guidance: true
+  parallel_tool_call_guidance: true
+  environment_probe: true
+
+memory:
+  memory_enabled: false
+  user_profile_enabled: false        # prevents cross-run bleed between negotiations
+  write_approval: false
+
+tool_loop_guardrails:
+  warnings_enabled: true
+  hard_stop_enabled: false
+  warn_after:
+    exact_failure: 2
+    same_tool_failure: 3
+    idempotent_no_progress: 2
+  hard_stop_after:
+    exact_failure: 5
+    same_tool_failure: 8
+    # Must stay above NEGOTIATION_N_STEPS (20). On the mycelium-room gateway Hermes forces hard
+    # stops on (non_interactive_hard_stop_enabled defaults to true), and its identical-call streak
+    # halts the turn at this count. Rounds that arrive mid-turn are injected into the same turn,
+    # and an agent that accepts each round runs the identical `mycelium negotiate respond accept`
+    # every time: at 5 (develop's value and the Hermes default) the 5th accept halted the turn,
+    # swallowed the next round's message, and the session failed ("agents silent for 300s").
+    # Check: docker exec -i hermes_spoke_studentlife /opt/hermes/.venv/bin/python - < tests/check_guardrail.py
+    idempotent_no_progress: 25
+
+session_reset:
+  mode: none
+
+display:
+  personality: ''
+  tool_progress: all
+
 _config_version: 54
 telemetry:
   shared_metrics:
     enabled: false
     send: false
     offer_version: 2
+
 plugins:
   enabled:
     - mycelium
+
 platforms:
   mycelium-room:
     enabled: true
@@ -31,6 +91,11 @@ platforms:
           agents:
             - __AGENT__
       require_mention: true
+
+logging:
+  level: INFO
+
 onboarding:
   seen:
+    profile_build_offered: true
     busy_input_prompt: true
