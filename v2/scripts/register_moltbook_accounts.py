@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Create the five Moltbook agent accounts the bridge needs and store their API keys in .env.
 
-Accounts / env variables (see bridge_service.py):
+Accounts / env variables (see bridge/bridge_service.py):
     bridge        -> MOLTBOOK_API_KEY                 (reads posts, kickoff + consensus comments)
     financeguard  -> MOLTBOOK_API_KEY_FINANCEGUARD    (posts that agent's reply)
     careermax     -> MOLTBOOK_API_KEY_CAREERMAX

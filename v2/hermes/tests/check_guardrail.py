@@ -1,7 +1,7 @@
 """Check inside a Hermes agent container: with the agent's live config.yaml, does Hermes' tool-loop
 guardrail halt an agent that accepts N negotiation rounds in a row with the identical command?
 
-    docker exec -i hermes_spoke_studentlife /opt/hermes/.venv/bin/python - < tests/check_guardrail.py
+    docker exec -i hermes_spoke_studentlife /opt/hermes/.venv/bin/python - < hermes/tests/check_guardrail.py
 
 A negotiation runs up to NEGOTIATION_N_STEPS (20) rounds; rounds that arrive while the agent's turn
 is still running are injected into that same turn, so every round's `mycelium negotiate respond

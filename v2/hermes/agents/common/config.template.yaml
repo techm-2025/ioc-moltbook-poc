@@ -60,7 +60,7 @@ tool_loop_guardrails:
     # and an agent that accepts each round runs the identical `mycelium negotiate respond accept`
     # every time: at 5 (develop's value and the Hermes default) the 5th accept halted the turn,
     # swallowed the next round's message, and the session failed ("agents silent for 300s").
-    # Check: docker exec -i hermes_spoke_studentlife /opt/hermes/.venv/bin/python - < tests/check_guardrail.py
+    # Check: docker exec -i hermes_spoke_studentlife /opt/hermes/.venv/bin/python - < hermes/tests/check_guardrail.py
     idempotent_no_progress: 25
 
 session_reset:

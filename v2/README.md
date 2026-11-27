@@ -21,7 +21,7 @@
   * [Step 1: Start the stack (Mycelium + Hermes agents)](#step-1-start-the-stack-mycelium--hermes-agents)
   * [Step 2: Expose Mycelium via Cloudflare tunnel](#step-2-expose-mycelium-via-cloudflare-tunnel)
   * [Step 3: Hermes agent spokes](#step-3-hermes-agent-spokes)
-  * [Step 4: Run Orchestrator in Google Colab](#step-4-run-orchestrator-in-google-colab)
+  * [Step 4 (optional): Run the Phase 2 orchestrator in Google Colab](#step-4-optional-run-the-phase-2-orchestrator-in-google-colab)
   * [Configuration & Maintenance Reference](#configuration--maintenance-reference)
 * [5. Observability & Scoring](#5-observability--scoring)
   * [Token & Cost Telemetry](#token--cost-telemetry)
@@ -41,7 +41,7 @@ Phase 1 implements a hub-and-spoke multi-agent system where four isolated Hermes
 4. Summarizes room dialogues and posts consensus results back to Moltbook.
 
 ### Phase 2: Autonomous Topic Mining (ATM Control Plane)
-Phase 2 shifts the system from human-triggered sessions to a fully autonomous, 13-stage pipeline executed via `topic_engine.py` and the Google Colab orchestrator (`Moltbook_Mycelium_bridge_svc_orchestrator.ipynb`):
+Phase 2 shifts the system from human-triggered sessions to a fully autonomous, 13-stage pipeline executed via `topic_engine.py` and the Google Colab orchestrator (`Moltbook_Mycelium_bridge_svc_orchestrator.ipynb`). Both are kept in the repository root (v1); v2 runs the bridge itself in Docker (`bridge/`):
 * **Stage 1 (Ingestion):** Ingests live Moltbook streams or local JSON datasets (`structured_conversation.json`).
 * **Stage 2 (Topic Discovery):** Extracts candidate topics using slide-window boundary clustering.
 * **Stage 3 (Semantic Enrichment):** Maps context, facts, and participant intents.
@@ -124,32 +124,39 @@ Phase 2 shifts the system from human-triggered sessions to a fully autonomous, 1
 ```
 v2/
 ├── README.md
-├── requirements.txt                                                # Python deps (bridge image, Colab)
 ├── .env.example                                                    # Template for the single shared .env
 ├── .gitignore                                                      # Keeps .env, .venv and local state out of git
-├── .dockerignore                                                   # Allow-list for the bridge build context
 ├── .gitattributes                                                  # LF endings for .sh scripts run in containers
-├── structured_conversation.json                                    # Local dataset for USE_LOCAL_JSON="True"
+├── docker-compose.yml                                              # Whole stack: Mycelium + 4 Hermes agents + bridge + health check
 │
-├── Core Pipeline & Orchestration
-│   ├── Moltbook_Mycelium_bridge_svc_orchestrator.ipynb             # Main 13-stage Colab orchestrator notebook
+├── bridge/                                                         # Everything for the Moltbook <-> Mycelium bridge
+│   ├── Dockerfile                                                  # Bridge image (build context is this folder)
+│   ├── .dockerignore                                               # Allow-list: only the runtime files below enter the image
+│   ├── run_bridge.py                                               # CLI: list / process / watch (docker compose run --rm bridge ...)
 │   ├── bridge_service.py                                           # Central bridge hub, clients, & state manager
-│   ├── topic_engine.py                                             # ATM Control Plane (Stages 1-9 & GLM scoring)
-│   └── summariser_module.py                                        # Public-safe consensus summary generator
+│   ├── summariser_module.py                                        # Public-safe consensus summary generator
+│   ├── solver.py                                                   # Moltbook verification challenge solver (LLM + rules)
+│   ├── requirements.txt                                            # Python deps of the bridge image
+│   └── tests/test_solver.py                                        # Solver tests (Moltbook example + verified real challenges)
 │
-├── Infrastructure & Deployment
-│   ├── docker-compose.yml                                          # Whole stack: Mycelium + 4 Hermes agents + bridge
-│   ├── mycelium/                                                   # Mycelium backend, DB, frontend & CFN services (included by compose)
-│   │   └── initdb/create-cfn-cp-db.sh                              # Creates the CFN databases on first DB start
-│   ├── hermes/                                                     # Hermes agents
-│   │   ├── Dockerfile                                              # Hermes image + Mycelium CLI + boot-time seed
-│   │   ├── agent-seed.sh                                           # Applies hermes/agents/ to each agent on every boot
-│   │   └── agents/                                                 # Agent definitions (tracked)
-│   │       ├── <agent>/SOUL.md                                     # Persona of financeguard / careermax / studentlife / riskanalyst
-│   │       └── common/                                             # Shared: config.template.yaml, Mycelium plugin, CLI config
-│   ├── bridge/                                                     # Bridge container (docker compose run --rm bridge ...)
-│   ├── scripts/apply_agents.sh                                     # Recreate the agents and verify their definitions
-│   └── scripts/register_moltbook_accounts.py                       # Create the 5 Moltbook accounts; writes their keys to .env
+├── mycelium/                                                       # Mycelium backend, DB, frontend & CFN services (included by compose)
+│   ├── docker-compose.yml
+│   ├── initdb/create-cfn-cp-db.sh                                  # Creates the CFN databases on first DB start
+│   └── scripts/                                                    # backend-start.sh (workspace lookup), setup-room.sh (room + sync-mas)
+│
+├── hermes/                                                         # Hermes agents
+│   ├── Dockerfile                                                  # Hermes image + Mycelium CLI + boot-time seed
+│   ├── agent-seed.sh                                               # Applies hermes/agents/ to each agent on every boot
+│   ├── agents/                                                     # Agent definitions (tracked)
+│   │   ├── <agent>/SOUL.md                                         # Persona of financeguard / careermax / studentlife / riskanalyst
+│   │   └── common/                                                 # Shared: config.template.yaml, Mycelium plugin, CLI config
+│   └── tests/check_guardrail.py                                    # Checks the tool-loop guardrail against an agent's live config
+│
+├── scripts/                                                        # Host scripts
+│   ├── up.sh                                                       # docker compose up --wait + health report and UI links
+│   ├── healthcheck.sh                                              # Whole-stack health check (also run by the stack-health service)
+│   ├── apply_agents.sh                                             # Recreate the agents and verify their definitions
+│   └── register_moltbook_accounts.py                               # Create the 5 Moltbook accounts; writes their keys to .env
 │
 └── docs/RUNBOOK.md                                                 # Bring-up, operations, reset & troubleshooting
 ```
@@ -163,8 +170,7 @@ v2/
 * **Containers & Orchestration:** Docker Engine `v24.0+` and Docker Compose `v2.20+`.
 * **Mycelium CLI:** not needed on the host; `v1.1.3` is baked into the Hermes image at build time.
 * **LLM gateway:** An OpenAI-compatible LiteLLM proxy reachable from the containers (default `:4000` on the host).
-* **Tunneling:** Cloudflare Tunnel (`cloudflared`, run as a container), only needed for the Colab orchestrator.
-* **Execution Environment:** Google Colab (for running the orchestrator notebook).
+* **Tunneling:** Cloudflare Tunnel (`cloudflared`, run as a container), only needed for the optional Colab orchestrator (Step 4).
 
 ### Environment Variables & Colab Secrets
 
@@ -278,14 +284,13 @@ docker compose run --rm bridge process <post_id> --no-publish   # add --force to
 
 If a run fails, make sure the room is empty before retrying (`GET /api/rooms/moltbook-mycelium-demo/sessions` should return `"total":0`); new runs otherwise join the stuck session.
 
-### Step 4: Run Orchestrator in Google Colab
-1. Open `Moltbook_Mycelium_bridge_svc_orchestrator.ipynb` in Google Colab.
-2. Upload the required Python modules from `v2/` to the notebook session workspace:
-   * `bridge_service.py`
-   * `topic_engine.py`
-   * `summariser_module.py`
-   * `structured_conversation.json` (if running with `USE_LOCAL_JSON="True"`)
-3. Set your secrets in Colab (`LITELLM_API_KEY`, `MOLTBOOK_API_KEY`, etc.).
+### Step 4 (optional): Run the Phase 2 orchestrator in Google Colab
+v2 runs the bridge in Docker (above). The Phase 2 Colab orchestrator is not part of v2; its notebook, `topic_engine.py` and `structured_conversation.json` are in the repository root.
+1. Open `Moltbook_Mycelium_bridge_svc_orchestrator.ipynb` (repository root) in Google Colab.
+2. Upload to the notebook session workspace:
+   * from `v2/bridge/`: `bridge_service.py`, `summariser_module.py`, `solver.py` (the fixed versions; without `solver.py`, Moltbook verification falls back to the much weaker legacy solver)
+   * from the repository root: `topic_engine.py`, and `structured_conversation.json` if running with `USE_LOCAL_JSON="True"`
+3. Set your secrets in Colab (`LITELLM_API_KEY`, `MOLTBOOK_API_KEY`, etc.) and `MYCELIUM_BASE_URL` to the tunnel URL from Step 2. Give `LITELLM_URL` as the full `.../v1/chat/completions` endpoint: the root `topic_engine.py` does not add it (the v2 modules accept either form).
 4. Execute all notebook cells sequentially to run Stages 1 through 13.
 
 ### Configuration & Maintenance Reference
@@ -306,12 +311,12 @@ The platform implements dual-key LiteLLM tracking to segregate orchestrator cost
 Call metrics are queried directly from the LiteLLM proxy `/user/info` endpoint before and after room sessions to compute exact delta token usage and dollar expenditure. The test script for this (`token_usage_calc_test.py`) is in `misc_utilities/` at the repository root, not in v2.
 
 ### Moltbook Verification Challenge Solver
-Moltbook requires automated math challenge verification before accepting posts. `bridge_service.py` includes a solver module (`solver.py` with `solve_challenge_legacy` fallback) and an automated circuit breaker:
+Moltbook requires automated math challenge verification before accepting posts. `bridge/bridge_service.py` uses `bridge/solver.py` (LLM decoding with a rule-based cross-check; `solve_challenge_legacy` as last resort) and an automated circuit breaker:
 * **Circuit Breaker Threshold:** Triggers after **8 consecutive failures**, halting outreach to prevent account lockouts.
 * **Benchmark Harness:** The 100-run verification benchmark (`verif_challenge_solver_benchmark.py`) is in `misc_utilities/` at the repository root, not in v2.
 
 ### Empirical Scoring Rubric Evaluation
-The candidate topic actionability scoring mechanism in `topic_engine.py` was derived through rigorous offline ML evaluation over a synthetic dataset of 50 multi-topic conversations (172 extracted topic payloads). v2 ships only the resulting scoring in `topic_engine.py`; the evaluation notebooks, scripts and dataset are in `scoring_rubric_eval/` at the repository root.
+The candidate topic actionability scoring mechanism in `topic_engine.py` was derived through rigorous offline ML evaluation over a synthetic dataset of 50 multi-topic conversations (172 extracted topic payloads). The resulting scoring lives in `topic_engine.py` and the evaluation notebooks, scripts and dataset in `scoring_rubric_eval/`, both at the repository root (not in v2).
 
 ```
 +-----------------------------------------------------------------------------------+

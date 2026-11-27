@@ -2,7 +2,7 @@
 """Tests for solver.py: the rule-based path offline, plus the LLM path with --live.
 
     docker compose run --rm -T --no-deps --entrypoint python bridge tests/test_solver.py [--live]
-    python3 tests/test_solver.py            # from v2/, if `requests` is installed (rules only)
+    python3 bridge/tests/test_solver.py     # from v2/, if `requests` is installed (rules only)
 
 Case 1 is the official example from https://www.moltbook.com/skill.md ("AI Verification
 Challenges"); the rest follow the same obfuscation (alternating caps, scattered ] ^ [ / -

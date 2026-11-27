@@ -1,0 +1,9 @@
+# Allow-list: only the bridge runtime enters the image.
+*
+!bridge_service.py
+!summariser_module.py
+!solver.py
+!run_bridge.py
+!requirements.txt
+!tests/
+**/__pycache__

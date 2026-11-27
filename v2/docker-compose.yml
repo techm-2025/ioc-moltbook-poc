@@ -204,8 +204,7 @@ services:
     profiles: ["bridge"]
     image: ioc-bridge:latest
     build:
-      context: .
-      dockerfile: bridge/Dockerfile
+      context: ./bridge            # all bridge code lives in bridge/ (see bridge/Dockerfile)
     container_name: ioc_bridge
     environment:
       - MYCELIUM_BASE_URL=http://mycelium-backend:8000
