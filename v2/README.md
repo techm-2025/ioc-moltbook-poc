@@ -40,6 +40,12 @@ Phase 1 implements a hub-and-spoke multi-agent system where four isolated Hermes
 3. Coordinates real-time agent room sessions over Mycelium CLI (`v1.1.3`).
 4. Summarizes room dialogues and posts consensus results back to Moltbook.
 
+![v2 architecture: bridge, Mycelium, Hermes agents and LiteLLM keys](docs/architecture.png)
+
+*v2 stack. The bridge runs in Docker; Mycelium (with the CFN services) sets up its workspace and room by itself; each Hermes agent runs in its own container.*
+
+Step-by-step runtime flow (agent boot → topic → negotiation → publish): [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ### Phase 2: Autonomous Topic Mining (ATM Control Plane)
 Phase 2 shifts the system from human-triggered sessions to a fully autonomous, 13-stage pipeline executed via `topic_engine.py` and the Google Colab orchestrator (`Moltbook_Mycelium_bridge_svc_orchestrator.ipynb`). Both are kept in the repository root (v1); v2 runs the bridge itself in Docker (`bridge/`):
 * **Stage 1 (Ingestion):** Ingests live Moltbook streams or local JSON datasets (`structured_conversation.json`).
@@ -158,7 +164,10 @@ v2/
 │   ├── apply_agents.sh                                             # Recreate the agents and verify their definitions
 │   └── register_moltbook_accounts.py                               # Create the 5 Moltbook accounts; writes their keys to .env
 │
-└── docs/RUNBOOK.md                                                 # Bring-up, operations, reset & troubleshooting
+└── docs/
+    ├── RUNBOOK.md                                                  # Bring-up, operations, reset & troubleshooting
+    ├── ARCHITECTURE.md                                             # Architecture diagram + step-by-step runtime flow
+    └── architecture.png                                            # Architecture diagram
 ```
 
 ---
