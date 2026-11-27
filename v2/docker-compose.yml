@@ -1,0 +1,241 @@
+# Single project for Mycelium + the 4 Hermes agents.
+# `name: mycelium` keeps the existing volume names (mycelium_mycelium-db-data, ...).
+name: mycelium
+
+include:
+  - path: mycelium/docker-compose.yml
+    env_file: .env          # one shared .env at the repo root
+
+# Hermes image with the Mycelium CLI baked in (see hermes/Dockerfile); built once, shared by all 4 agents.
+# Each agent's identity/config lives in ./hermes/agents (tracked) and is applied on every boot;
+# its runtime state lives in a named volume (hermes-<agent>-data), not on the host.
+x-hermes-agent: &hermes-agent
+  image: ioc-hermes-mycelium:1.1.3
+  build:
+    context: ./hermes
+    args:
+      MYCELIUM_VERSION: "1.1.3"
+
+services:
+  financeguard:
+    <<: *hermes-agent
+    container_name: hermes_spoke_financeguard
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+    command: ["hermes", "gateway", "run"]
+    ports:
+      - "127.0.0.1:${FINANCEGUARD_PORT:-8641}:9119"
+    volumes:
+      - hermes-financeguard-data:/opt/data   # agent state (sessions, caches, logs) stays inside Docker
+      - ./hermes/agents:/opt/agent-def:ro    # tracked definition, applied at boot by 03-agent-seed
+    environment:
+      - HERMES_HOME=/opt/data
+      - HERMES_DASHBOARD=1
+      - HERMES_DASHBOARD_BASIC_AUTH_USERNAME=${HERMES_DASHBOARD_USER:-admin}
+      - HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=${HERMES_DASHBOARD_PASSWORD:?set HERMES_DASHBOARD_PASSWORD in .env}
+      - CUSTOM_API_KEY=${CUSTOM_API_KEY:?set CUSTOM_API_KEY in .env}
+      - MYCELIUM_API_URL=http://mycelium-backend:8000
+      - MYCELIUM_AGENT_NAME=financeguard
+      - MYCELIUM_ROOM=${MYCELIUM_ROOM:-moltbook-mycelium-demo}
+      - AGENT_LLM_BASE_URL=${AGENT_LLM_BASE_URL:-${LLM_BASE_URL:-}}
+      - AGENT_LLM_MODEL=${AGENT_LLM_MODEL:-${LITELLM_MODEL:-}}
+      - USER=team_shared
+      - GATEWAY_ALLOW_ALL_USERS=true
+    depends_on:
+      mycelium-backend:
+        condition: service_healthy
+      mycelium-setup:            # room exists and is linked to the CFN
+        condition: service_completed_successfully
+
+  careermax:
+    <<: *hermes-agent
+    container_name: hermes_spoke_careermax
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+    command: ["hermes", "gateway", "run"]
+    ports:
+      - "127.0.0.1:${CAREERMAX_PORT:-8645}:9119"
+    volumes:
+      - hermes-careermax-data:/opt/data   # agent state (sessions, caches, logs) stays inside Docker
+      - ./hermes/agents:/opt/agent-def:ro    # tracked definition, applied at boot by 03-agent-seed
+    environment:
+      - HERMES_HOME=/opt/data
+      - HERMES_DASHBOARD=1
+      - HERMES_DASHBOARD_BASIC_AUTH_USERNAME=${HERMES_DASHBOARD_USER:-admin}
+      - HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=${HERMES_DASHBOARD_PASSWORD:?set HERMES_DASHBOARD_PASSWORD in .env}
+      - CUSTOM_API_KEY=${CUSTOM_API_KEY:?set CUSTOM_API_KEY in .env}
+      - MYCELIUM_API_URL=http://mycelium-backend:8000
+      - MYCELIUM_AGENT_NAME=careermax
+      - MYCELIUM_ROOM=${MYCELIUM_ROOM:-moltbook-mycelium-demo}
+      - AGENT_LLM_BASE_URL=${AGENT_LLM_BASE_URL:-${LLM_BASE_URL:-}}
+      - AGENT_LLM_MODEL=${AGENT_LLM_MODEL:-${LITELLM_MODEL:-}}
+      - USER=team_shared
+      - GATEWAY_ALLOW_ALL_USERS=true
+    depends_on:
+      mycelium-backend:
+        condition: service_healthy
+      mycelium-setup:            # room exists and is linked to the CFN
+        condition: service_completed_successfully
+
+  studentlife:
+    <<: *hermes-agent
+    container_name: hermes_spoke_studentlife
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+    command: ["hermes", "gateway", "run"]
+    ports:
+      - "127.0.0.1:${STUDENTLIFE_PORT:-8643}:9119"
+    volumes:
+      - hermes-studentlife-data:/opt/data   # agent state (sessions, caches, logs) stays inside Docker
+      - ./hermes/agents:/opt/agent-def:ro    # tracked definition, applied at boot by 03-agent-seed
+    environment:
+      - HERMES_HOME=/opt/data
+      - HERMES_DASHBOARD=1
+      - HERMES_DASHBOARD_BASIC_AUTH_USERNAME=${HERMES_DASHBOARD_USER:-admin}
+      - HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=${HERMES_DASHBOARD_PASSWORD:?set HERMES_DASHBOARD_PASSWORD in .env}
+      - CUSTOM_API_KEY=${CUSTOM_API_KEY:?set CUSTOM_API_KEY in .env}
+      - MYCELIUM_API_URL=http://mycelium-backend:8000
+      - MYCELIUM_AGENT_NAME=studentlife
+      - MYCELIUM_ROOM=${MYCELIUM_ROOM:-moltbook-mycelium-demo}
+      - AGENT_LLM_BASE_URL=${AGENT_LLM_BASE_URL:-${LLM_BASE_URL:-}}
+      - AGENT_LLM_MODEL=${AGENT_LLM_MODEL:-${LITELLM_MODEL:-}}
+      - USER=team_shared
+      - GATEWAY_ALLOW_ALL_USERS=true
+    depends_on:
+      mycelium-backend:
+        condition: service_healthy
+      mycelium-setup:            # room exists and is linked to the CFN
+        condition: service_completed_successfully
+
+  riskanalyst:
+    <<: *hermes-agent
+    container_name: hermes_spoke_riskanalyst
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+    command: ["hermes", "gateway", "run"]
+    ports:
+      - "127.0.0.1:${RISKANALYST_PORT:-8644}:9119"
+    volumes:
+      - hermes-riskanalyst-data:/opt/data   # agent state (sessions, caches, logs) stays inside Docker
+      - ./hermes/agents:/opt/agent-def:ro    # tracked definition, applied at boot by 03-agent-seed
+    environment:
+      - HERMES_HOME=/opt/data
+      - HERMES_DASHBOARD=1
+      - HERMES_DASHBOARD_BASIC_AUTH_USERNAME=${HERMES_DASHBOARD_USER:-admin}
+      - HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=${HERMES_DASHBOARD_PASSWORD:?set HERMES_DASHBOARD_PASSWORD in .env}
+      - CUSTOM_API_KEY=${CUSTOM_API_KEY:?set CUSTOM_API_KEY in .env}
+      - MYCELIUM_API_URL=http://mycelium-backend:8000
+      - MYCELIUM_AGENT_NAME=riskanalyst
+      - MYCELIUM_ROOM=${MYCELIUM_ROOM:-moltbook-mycelium-demo}
+      - AGENT_LLM_BASE_URL=${AGENT_LLM_BASE_URL:-${LLM_BASE_URL:-}}
+      - AGENT_LLM_MODEL=${AGENT_LLM_MODEL:-${LITELLM_MODEL:-}}
+      - USER=team_shared
+      - GATEWAY_ALLOW_ALL_USERS=true
+    depends_on:
+      mycelium-backend:
+        condition: service_healthy
+      mycelium-setup:            # room exists and is linked to the CFN
+        condition: service_completed_successfully
+
+  # Whole-stack health check, started by every `docker compose up`. Runs scripts/healthcheck.sh in
+  # --watch mode from inside the network: Mycelium, CFN, room + mas_id, each agent's gateway, room
+  # connection and dashboard login, and LLM proxy reachability. It turns "healthy" only while every
+  # check passes, so:
+  #   docker compose up -d --wait        # returns once the whole stack is verified (non-zero if not)
+  #   docker compose logs stack-health   # the report + the list of UIs/dashboards to open
+  # Reuses the Hermes image (bash + curl), so nothing extra is pulled. It has no ports and no docker socket.
+  stack-health:
+    <<: *hermes-agent        # same image + build as the agents (cached), so a fresh clone never tries to pull it
+    container_name: stack-health
+    restart: unless-stopped
+    entrypoint: ["bash", "/opt/healthcheck.sh", "--watch"]
+    volumes:
+      - ./scripts/healthcheck.sh:/opt/healthcheck.sh:ro
+    environment:
+      - HC_INTERVAL=${HC_INTERVAL:-60}
+      - MYCELIUM_ROOM=${MYCELIUM_ROOM:-moltbook-mycelium-demo}
+      - HERMES_DASHBOARD_USER=${HERMES_DASHBOARD_USER:-admin}
+      - HERMES_DASHBOARD_PASSWORD=${HERMES_DASHBOARD_PASSWORD:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - AGENT_LLM_BASE_URL=${AGENT_LLM_BASE_URL:-${LLM_BASE_URL:-}}
+      - CUSTOM_API_KEY=${CUSTOM_API_KEY:-}
+      # host ports, only used to print the links
+      - MYCELIUM_BACKEND_PORT=${MYCELIUM_BACKEND_PORT:-8000}
+      - MYCELIUM_UI_PORT=${MYCELIUM_UI_PORT:-3000}
+      - MYCELIUM_DB_PORT=${MYCELIUM_DB_PORT:-5433}
+      - FINANCEGUARD_PORT=${FINANCEGUARD_PORT:-8641}
+      - CAREERMAX_PORT=${CAREERMAX_PORT:-8645}
+      - STUDENTLIFE_PORT=${STUDENTLIFE_PORT:-8643}
+      - RISKANALYST_PORT=${RISKANALYST_PORT:-8644}
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/stack-healthy"]
+      interval: 5s
+      timeout: 3s
+      retries: 1
+      start_period: 300s     # agents need ~15-40 s after boot to reach the room
+      start_interval: 5s
+    depends_on:
+      mycelium-backend:
+        condition: service_healthy
+      mycelium-setup:            # room exists and is linked to the CFN
+        condition: service_completed_successfully
+      mycelium-frontend:
+        condition: service_started
+      financeguard:
+        condition: service_started
+      careermax:
+        condition: service_started
+      studentlife:
+        condition: service_started
+      riskanalyst:
+        condition: service_started
+
+  # Moltbook <-> Mycelium bridge. On-demand (compose profile "bridge"), so `docker compose up`
+  # does not start it. It posts PUBLIC comments on Moltbook unless run with --no-publish:
+  #   docker compose run --rm bridge list
+  #   docker compose run --rm bridge process <post_id> --no-publish
+  #   docker compose run --rm bridge process <post_id>
+  bridge:
+    profiles: ["bridge"]
+    image: ioc-bridge:latest
+    build:
+      context: .
+      dockerfile: bridge/Dockerfile
+    container_name: ioc_bridge
+    environment:
+      - MYCELIUM_BASE_URL=http://mycelium-backend:8000
+      - MYCELIUM_ROOM=${MYCELIUM_ROOM:-moltbook-mycelium-demo}
+      - MYCELIUM_SENDER=${MYCELIUM_SENDER:-amlan}
+      - MOLTBOOK_SUBMOLT=${MOLTBOOK_SUBMOLT:-secure-dev-logic}
+      - MOLTBOOK_API_KEY=${MOLTBOOK_API_KEY:-}
+      - MOLTBOOK_API_KEY_FINANCEGUARD=${MOLTBOOK_API_KEY_FINANCEGUARD:-}
+      - MOLTBOOK_API_KEY_CAREERMAX=${MOLTBOOK_API_KEY_CAREERMAX:-}
+      - MOLTBOOK_API_KEY_STUDENTLIFE=${MOLTBOOK_API_KEY_STUDENTLIFE:-}
+      - MOLTBOOK_API_KEY_RISKANALYST=${MOLTBOOK_API_KEY_RISKANALYST:-}
+      - LITELLM_URL=${LITELLM_URL:-https://litellm.prod.outshift.ai/v1/chat/completions}
+      - LITELLM_MODEL=${LITELLM_MODEL:-azure/gpt-4o-mini}
+      - LITELLM_API_KEY=${LITELLM_API_KEY:-}
+      - LITELLM_USER_ID1=${LITELLM_USER_ID1:-}
+      - LITELLM_API_KEY2=${LITELLM_API_KEY2:-}
+      - LITELLM_USER_ID2=${LITELLM_USER_ID2:-}
+      - SCENARIO_FACTS=${SCENARIO_FACTS:-}
+      - BRIDGE_STATE_PATH=/data/bridge_state.json
+    volumes:
+      - bridge-state:/data
+    depends_on:
+      mycelium-backend:
+        condition: service_healthy
+      mycelium-setup:            # room exists and is linked to the CFN
+        condition: service_completed_successfully
+
+volumes:
+  bridge-state:
+  hermes-financeguard-data:
+  hermes-careermax-data:
+  hermes-studentlife-data:
+  hermes-riskanalyst-data:

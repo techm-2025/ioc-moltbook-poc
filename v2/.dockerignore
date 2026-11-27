@@ -1,0 +1,6 @@
+# Allow-list: nothing enters a build context unless listed here (keeps .env, profiles/, .git, .venv out).
+*
+!bridge_service.py
+!summariser_module.py
+!requirements.txt
+!bridge/

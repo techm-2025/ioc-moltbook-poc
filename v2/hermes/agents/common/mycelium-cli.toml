@@ -1,0 +1,8 @@
+# Mycelium CLI config used by the agents' `mycelium negotiate ...` tool calls.
+# Installed as /opt/data/home/.mycelium/config.toml on every boot by hermes/agent-seed.sh;
+# ${MYCELIUM_API_URL} is filled in from the container env (set in docker-compose.yml).
+[identity]
+autonomous = false
+
+[server]
+api_url = "${MYCELIUM_API_URL}"

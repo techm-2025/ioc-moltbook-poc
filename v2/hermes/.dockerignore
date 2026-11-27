@@ -1,0 +1,2 @@
+# Agent definitions are mounted read-only at runtime (docker-compose.yml), never baked into the image.
+agents/

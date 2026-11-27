@@ -1,0 +1,185 @@
+# Mycelium stack (no `mycelium` CLI needed). Included by ../docker-compose.yml, which
+# supplies the single shared ../.env; it can also be run alone with `--env-file ../.env`.
+# Derived from the compose file the CLI v1.1.3 generates (~/.mycelium/docker/compose.yml).
+#
+#   docker compose --env-file ../.env up -d     # standalone use
+#
+# Services: db, backend (:8000), CFN mgmt plane (:9000), CFN node (:9002), frontend (:3000),
+# plus two automatic setup steps (scripts/), so a fresh clone or `down -v` needs no manual steps:
+#   backend-start.sh  resolves WORKSPACE_ID from the CFN before the backend starts
+#   mycelium-setup    one-shot: creates MYCELIUM_ROOM if missing and links it to the CFN (sync-mas)
+
+services:
+
+  mycelium-db:
+    image: ghcr.io/mycelium-io/mycelium-db:${MYCELIUM_IMAGE_TAG:-latest}
+    platform: linux/amd64
+    container_name: mycelium-db
+    restart: unless-stopped
+    command: postgres -c max_locks_per_transaction=256
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${MYCELIUM_DB_PASSWORD:-password}
+      POSTGRES_DB: mycelium
+    ports:
+      - "127.0.0.1:${MYCELIUM_DB_PORT:-5433}:5432"
+    volumes:
+      - mycelium-db-data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mycelium"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: a fresh named volume is root-owned, but the backend runs as uid 1000
+  # (user "mycelium"), so it cannot create ~/.mycelium/rooms without this.
+  mycelium-data-init:
+    image: ghcr.io/mycelium-io/mycelium-backend:${MYCELIUM_IMAGE_TAG:-latest}
+    container_name: mycelium-data-init
+    user: root
+    entrypoint: ["sh", "-c", "chown -R 1000:0 /data && chmod -R g+rwX /data"]
+    restart: "no"
+    volumes:
+      - mycelium-data:/data
+
+  mycelium-backend:
+    image: ghcr.io/mycelium-io/mycelium-backend:${MYCELIUM_IMAGE_TAG:-latest}
+    container_name: mycelium-backend
+    restart: unless-stopped
+    # Resolves WORKSPACE_ID from the CFN (empty or stale after a DB reset), then runs the image's
+    # own ./start.sh. See scripts/backend-start.sh.
+    command: ["sh", "/opt/ioc/backend-start.sh"]
+    depends_on:
+      mycelium-data-init:
+        condition: service_completed_successfully
+      mycelium-db:
+        condition: service_healthy
+      ioc-cfn-mgmt-plane-svc:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:${MYCELIUM_DB_PASSWORD:-password}@mycelium-db:5432/mycelium
+      GRAPH_DB_URL: postgresql://postgres:${MYCELIUM_DB_PASSWORD:-password}@mycelium-db:5432/mycelium
+      API_BASE_URL: http://mycelium-backend:8000
+      COORDINATION_TICK_TIMEOUT_SECONDS: ${COORDINATION_TICK_TIMEOUT_SECONDS:-30}
+      CFN_MGMT_URL: http://ioc-cfn-mgmt-plane-svc:9000
+      COGNITION_FABRIC_NODE_URL: http://ioc-cognition-fabric-node-svc:9002
+      MYCELIUM_DATA_DIR: /home/mycelium/.mycelium
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      NEGOTIATION_N_STEPS: ${NEGOTIATION_N_STEPS:-20}
+      ADMIN_USER_PASSWORD: ${ADMIN_USER_PASSWORD:-admin}
+      CFN_DEV_MODE: ${CFN_DEV_MODE:-false}
+      CFN_NAME: ${CFN_NAME:-mycelium-cfn}
+      # Optional: empty or stale -> backend-start.sh picks the CFN's "Default Workspace" at startup.
+      WORKSPACE_ID: ${WORKSPACE_ID:-}
+      CFN_WORKSPACE_NAME: ${CFN_WORKSPACE_NAME:-Default Workspace}
+    volumes:
+      # Named volume (the CLI bind-mounts ~/.mycelium; a named volume avoids Windows path issues)
+      - mycelium-data:/home/mycelium/.mycelium
+      - ./scripts:/opt/ioc:ro
+    ports:
+      - "127.0.0.1:${MYCELIUM_BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  # One-shot, on every `up`: create the room MYCELIUM_ROOM if missing and link it to the CFN
+  # (sync-mas). Idempotent. The Hermes agents wait for it to complete successfully.
+  mycelium-setup:
+    image: ghcr.io/mycelium-io/mycelium-backend:${MYCELIUM_IMAGE_TAG:-latest}
+    container_name: mycelium-setup
+    restart: "no"
+    entrypoint: ["sh", "/opt/ioc/setup-room.sh"]
+    environment:
+      MYCELIUM_API_URL: http://mycelium-backend:8000
+      MYCELIUM_ROOM: ${MYCELIUM_ROOM:-moltbook-mycelium-demo}
+      CFN_MGMT_URL: http://ioc-cfn-mgmt-plane-svc:9000
+    volumes:
+      - ./scripts:/opt/ioc:ro
+    depends_on:
+      mycelium-backend:
+        condition: service_healthy
+
+  mycelium-frontend:
+    image: ghcr.io/mycelium-io/mycelium-frontend:${MYCELIUM_IMAGE_TAG:-latest}
+    container_name: mycelium-frontend
+    restart: unless-stopped
+    environment:
+      MYCELIUM_INTERNAL_API_URL: http://mycelium-backend:8000
+    depends_on:
+      mycelium-backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${MYCELIUM_UI_PORT:-3000}:3000"
+
+  ioc-cfn-mgmt-plane-svc:
+    image: ghcr.io/outshift-open/ioc-cfn-mgmt-plane-svc:0.1.1
+    container_name: ioc-cfn-mgmt-plane-svc
+    restart: unless-stopped
+    depends_on:
+      mycelium-db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:9000:9000"
+    environment:
+      SERVICE_NAME: ioc-cfn-mgmt-plane-svc
+      APPLICATION_VERSION: latest
+      LOG_LEVEL: INFO
+      ADMIN_USER_PASSWORD: ${ADMIN_USER_PASSWORD:-admin}
+      POSTGRES_HOST: mycelium-db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${CFN_DB:-cfn_mgmt}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${MYCELIUM_DB_PASSWORD:-password}
+      PORT: 9000
+      CFN_DEV_MODE: ${CFN_DEV_MODE:-false}
+      CFN_NAME: ${CFN_NAME:-mycelium-cfn}   # must match the node svc's CFN_NAME
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  ioc-cognition-fabric-node-svc:
+    image: ghcr.io/outshift-open/ioc-cognition-fabric-node-svc:0.1.7
+    platform: linux/amd64
+    container_name: ioc-cognition-fabric-node-svc
+    restart: unless-stopped
+    depends_on:
+      mycelium-db:
+        condition: service_healthy
+      ioc-cfn-mgmt-plane-svc:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:9002:9002"
+    environment:
+      MGMT_URL: http://ioc-cfn-mgmt-plane-svc:9000
+      CFN_NAME: ${CFN_NAME:-mycelium-cfn}
+      DB_HOST: mycelium-db
+      DB_PORT: 5432
+      DB_NAME: cfn_cp
+      DB_USER: postgres
+      DB_PASSWORD: ${MYCELIUM_DB_PASSWORD:-password}
+      DB_SSL_MODE: disable
+      PORT: 9002
+      HEARTBEAT_INTERVAL_SECONDS: ${HEARTBEAT_INTERVAL_SECONDS:-29}
+      # semantic negotiation + shared memory call the LLM directly
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:9002/api/internal/diagnostics/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+volumes:
+  mycelium-db-data:
+  mycelium-data:

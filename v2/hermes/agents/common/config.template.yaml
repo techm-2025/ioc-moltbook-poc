@@ -1,0 +1,36 @@
+# Hermes config.yaml template shared by all 4 agents.
+# Rendered into each agent's /opt/data/config.yaml on EVERY container boot by hermes/agent-seed.sh:
+#   __AGENT__              -> the agent's MYCELIUM_AGENT_NAME
+#   ${AGENT_LLM_MODEL}     -> from .env (written into config.yaml at boot)
+#   ${AGENT_LLM_BASE_URL}  -> from .env (written into config.yaml at boot)
+#   ${MYCELIUM_ROOM}       -> from .env (written into config.yaml at boot)
+#   ${MYCELIUM_API_URL}    -> from docker-compose.yml (written into config.yaml at boot)
+#   ${CUSTOM_API_KEY}      -> left as-is; Hermes expands it at runtime, so the key is never stored on disk
+# Edit this file (not the copy inside the container), then run scripts/apply_agents.sh.
+model:
+  default: ${AGENT_LLM_MODEL}        # model name served by the LiteLLM proxy (no "openai/" prefix)
+  provider: custom
+  base_url: ${AGENT_LLM_BASE_URL}    # e.g. http://host.docker.internal:4000/v1 (containers can't use localhost)
+  api_key: ${CUSTOM_API_KEY}
+_config_version: 54
+telemetry:
+  shared_metrics:
+    enabled: false
+    send: false
+    offer_version: 2
+plugins:
+  enabled:
+    - mycelium
+platforms:
+  mycelium-room:
+    enabled: true
+    extra:
+      backend_url: ${MYCELIUM_API_URL}   # set by docker-compose.yml (backend service name inside Docker)
+      rooms:
+        - room: ${MYCELIUM_ROOM}         # from .env; the bridge uses the same MYCELIUM_ROOM
+          agents:
+            - __AGENT__
+      require_mention: true
+onboarding:
+  seen:
+    busy_input_prompt: true

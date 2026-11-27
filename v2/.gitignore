@@ -1,0 +1,8 @@
+bridge_state.json
+.env
+*.ipynb_checkpoints
+# Secrets / local runtime data
+.moltbook_claims.txt
+profiles/
+
+__pycache__/
